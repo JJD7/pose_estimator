@@ -4,13 +4,25 @@
 pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
 { // constructor
     ROS_INFO("in class constructor of ExampleRosClass");
+    readCalibFile();
 }
+
+void pose_estimator::readCalibFile()
+{
+        ROS_INFO("Loading Calibration File");
+        cv::FileStorage fs(calib_file_Dir + calib_file, cv::FileStorage::READ);
+        fs["Q"] >> Q;
+        if(Q.empty())
+                throw "Exception: could not read Q matrix";
+        fs.release();
+}
+
 
 void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 {
   try
   {
-    cv::imshow("view", cv_bridge::toCvShare(msg, "bgr8")->image);
+    cv::imshow("left_rectified_image", cv_bridge::toCvShare(msg, "bgr8")->image);
     cv::waitKey(30);
   }
   catch (cv_bridge::Exception& e)
@@ -38,13 +50,13 @@ int main(int argc, char **argv){
     ROS_INFO("Initializing Publishers");
     pose_estimate = nh.advertise<geometry_msgs::Pose>("estimated_pose",1);
 
+    pose_estimator posee(&nh);
+
     ROS_INFO("Running");
 
-    while(ros::ok()){
 
-            ros::spinOnce();
+    ros::spin();
 
-    }
 
     cv::destroyWindow("left_rectified_image");
     return 0;

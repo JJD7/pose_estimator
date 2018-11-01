@@ -20,6 +20,12 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package( OpenCV REQUIRED )
 
+find_package (VTK 6.2.0 REQUIRED)
+find_package (PCL 1.7.0 REQUIRED)
+find_package(Boost REQUIRED)
+find_package( CUDA REQUIRED )
+
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -126,9 +132,19 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
 )
 
+include_directories(/usr/local/cuda/include)
+set(
+    CUDA_NVCC_FLAGS
+    ${CUDA_NVCC_FLAGS};
+    -O3 -lineinfo
+    -gencode=arch=compute_50,code=sm_50
+    )
+
 message(STATUS ${OpenCV_INCLUDE_DIRS})
+message(STATUS ${PCL_INCLUDE_DIRS})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -181,9 +197,11 @@ message(STATUS ${OpenCV_INCLUDE_DIRS})
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
+link_directories(${PCL_LIBRARY_DIRS})
 add_executable(pose_estimator src/pose_estimator.cpp)
-target_link_libraries(pose_estimator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
+target_link_libraries(pose_estimator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${Boost_LIBRARIES})
 add_dependencies(pose_estimator pose_estimator_generate_messages_cpp)
+add_definitions(${PCL_DEFINITIONS})
 
 ## Mark cpp header files for installation
 # install(DIRECTORY include/${PROJECT_NAME}/
