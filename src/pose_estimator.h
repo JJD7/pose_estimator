@@ -31,6 +31,7 @@
 #include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/features2d.hpp>
+#include <opencv2/xfeatures2d.hpp>
 #include <opencv2/cudafeatures2d.hpp>
 #include <opencv2/cudafilters.hpp>
 #include <opencv2/cudawarping.hpp>
@@ -64,6 +65,7 @@
 
 using namespace std;
 using namespace cv;
+using namespace cv::xfeatures2d;
 using namespace cv::detail;
 
 class pose_estimator
@@ -76,48 +78,45 @@ class pose_estimator
     string read_PLY_filename1 = "";
     double focallength = 16.0 / 1000 / 3.75 * 1000000;
     double baseline = 600.0 / 1000;
+    double minDisparity = 64;
+    int rows = 0, cols = 0, cols_start_aft_cutout = 0;
+    int blur_kernel = 1;
+    int jump_pixels = 10;
+    int boundingBox = 20;
     int cutout_ratio = 8; //ratio of masking to be done on left side of image as this area is not covered in stereo disparity images.
     string calib_file = "cam13calib.yml";
     string calib_file_Dir = "/home/jd/catkin_ws/src/ros_multi_baseline_stereo/ros_sgm/config/";
     Mat Q;
-	
+
+    // Variables to store keypoints and descriptors
+    Ptr<FeaturesFinder> finder;
+    ImageFeatures features1, features2;	//has features.keypoints and features.descriptors
+    cuda::GpuMat gpu_descriptors1, gpu_descriptors2;
+    //std::vector<KeyPoint> keypoints1, keypoints2;
+    //Mat descriptors1, descriptors2;
+    geometry_msgs::Pose est_pose;
+    std::vector<DMatch> matches;
+    std::vector<Point2f> points1, points2;
+    Mat im1Gray, im2Gray, im1RGB, im2RGB;
+    Mat disparity1, disparity2;
+    Mat orb_img1, orb_img2;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D1, keypoints3D2;
+    vector<bool> keypoints3D_ROI_Points1, keypoints3D_ROI_Points2;
+    pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_MAVLink;
+    pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_FeatureMatched;
+
+    //Function Declarations
+    void createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb);
+    void extract_features(Mat &im);
+    void init(Mat &im);
+    double getMean(Mat disp_img);
+    double getVariance(Mat disp_img);
+
     private:
     ros::NodeHandle nh_;
-    geometry_msgs::Pose est_pose;
     void readCalibFile();
-
 };
 
-class RawImageData {
-public:
-	int img_num;
-	Mat rgb_image;
-	Mat disparity_image;
-	Mat segment_label;
-	Mat double_disparity_image;
-	
-	double time;	//NSECS
-	double tx;
-	double ty;
-	double tz;
-	double qx;
-	double qy;
-	double qz;
-	double qw;
-};
 
-class ImageData {
-public:
-	RawImageData* raw_img_data_ptr;
-	
-	ImageFeatures features;	//has features.keypoints and features.descriptors
-	cuda::GpuMat gpu_descriptors;
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D;
-	vector<bool> keypoints3D_ROI_Points;
-	
-	pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_MAVLink;
-	pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_FeatureMatched;
-	
-};
 
 #endif // POSE_ESTIMATOR_H
