@@ -1,4 +1,5 @@
 #include "pose_estimator.h"
+#include "functions.cpp"
 
 const int MAX_FEATURES = 1000;
 const float GOOD_MATCH_PERCENT = 0.15f;
@@ -8,6 +9,9 @@ pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
 { // constructor
     ROS_INFO("in class constructor of pose_estimator");
     readCalibFile();
+
+    ROS_INFO("Initializing Publishers");
+    pose_estimate = nh_.advertise<geometry_msgs::Pose>("estimated_pose",1);
 }
 
 void pose_estimator::readCalibFile()
@@ -21,6 +25,7 @@ void pose_estimator::readCalibFile()
         ROS_INFO("Loaded Camera Q matrix as: ");
         std::cout << Q << endl;
 }
+
 
 void pose_estimator::createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb)
 {
@@ -124,8 +129,8 @@ void pose_estimator::extract_features(Mat &im)
     finder = makePtr<OrbFeaturesFinder>();
     (*finder)(im2RGB, features2);
 
-    cuda::GpuMat descriptor(features2.descriptors);
-    gpu_descriptors2 = descriptor;
+    //cuda::GpuMat descriptor(features2.descriptors);
+    //gpu_descriptors2 = descriptor;
 
     vector<KeyPoint> keypoints = features2.keypoints;
 
@@ -173,6 +178,82 @@ void pose_estimator::extract_features(Mat &im)
     keypoints3D_ROI_Points2 = pointsInROIVec;
 }
 
+int pose_estimator::generate_Matched_Keypoints_Point_Cloud
+(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &current_img_matched_keypoints,
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr &fitted_cloud_matched_keypoints)
+{
+    cout << " matched with_imgs/matches";
+
+    int good_matched_imgs_this_src = 0;
+    int good_matches_count = 0;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_src = keypoints3D2;
+    vector<bool> pointsInROIVec_src = keypoints3D_ROI_Points2;
+
+
+    //reference https://stackoverflow.com/questions/44988087/opencv-feature-matching-match-descriptors-to-knn-filtered-keypoints
+    //reference https://github.com/opencv/opencv/issues/6130
+    //reference http://study.marearts.com/2014/07/opencv-study-orb-gpu-feature-extraction.html
+    //reference https://docs.opencv.org/3.1.0/d6/d1d/group__cudafeatures2d.html
+
+    BFMatcher matcher(NORM_HAMMING);
+    vector<vector<DMatch> > matches;
+    matcher.knnMatch(features2.descriptors, features1.descriptors, matches, 2);
+    //matcher->knnMatch(gpu_descriptors2, gpu_descriptors1, matches, 2);
+
+    vector<DMatch> good_matches;
+    for(int k = 0; k < matches.size(); k++)
+    {
+        if(matches[k][0].distance < 0.5 * matches[k][1].distance && matches[k][0].distance < 40)
+        {
+            good_matches.push_back(matches[k][0]);
+        }
+    }
+
+    if(good_matches.size() < featureMatchingThreshold/2)	//less number of matches.. don't bother working on this one. good matches are around 200-500
+        cout << "Insufficient number of feature matches for estimateing Feature Matched Pose" << endl;
+        // TO DO: Reject pose_estimate. Need to just use mavlink pose in this case
+
+    good_matched_imgs_this_src++;
+    good_matches_count += good_matches.size();
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_dst = keypoints3D1;
+
+    vector<bool> pointsInROIVec_dst = keypoints3D_ROI_Points1;
+
+    //using sequential matched points to estimate the rigid body transformation between matched 3D points
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_current_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_prior_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
+    cloud_current_temp->is_dense = true;
+    cloud_prior_temp->is_dense = true;
+
+    for (int match_index = 0; match_index < good_matches.size(); match_index++)
+    {
+        DMatch match = good_matches[match_index];
+
+        int dst_Idx = match.trainIdx;	//dst img
+        int src_Idx = match.queryIdx;	//src img
+
+        if(pointsInROIVec_src[src_Idx] == true && pointsInROIVec_dst[dst_Idx] == true)
+        {
+            cloud_current_temp->points.push_back(keypoints3D_src->points[src_Idx]);
+            cloud_prior_temp->points.push_back(keypoints3D_dst->points[dst_Idx]);
+        }
+    }
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_current_t_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_prior_t_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
+
+    //pcl::transformPointCloud(*cloud_current_temp, *cloud_current_t_temp, t_mat_MAVLink2);
+
+    pcl::transformPointCloud(*cloud_prior_temp, *cloud_prior_t_temp, t_mat_FeatureMatched1);
+
+    current_img_matched_keypoints->insert(current_img_matched_keypoints->end(),cloud_current_t_temp->begin(),cloud_current_t_temp->end());
+    fitted_cloud_matched_keypoints->insert(fitted_cloud_matched_keypoints->end(),cloud_prior_t_temp->begin(),cloud_prior_t_temp->end());
+
+    return good_matches_count;
+}
+
 void pose_estimator::init(Mat &im)
 {
     ROS_INFO("initalizing tracker");
@@ -183,9 +264,10 @@ void pose_estimator::init(Mat &im)
     features1 = features2;
     im1Gray = im2Gray;
     im1RGB = im2RGB;
-    orb_img1 = orb_img2;
+    //orb_img1 = orb_img2;
     initializing = false;
-    gpu_descriptors1 = gpu_descriptors2;
+    //gpu_descriptors1 = gpu_descriptors2;
+    pose_ekf1 = pose_ekf2;
 
 }
 
@@ -226,39 +308,69 @@ double pose_estimator::getVariance(Mat disp_img)
         return var;
 }
 
-void imageCallback(const sensor_msgs::ImageConstPtr& msg, pose_estimator &posee_ptr)
+void pose_estimator::estimatePose()
 {
-    cv_bridge::CvImagePtr cv_ptr;
+    if(initializing)
+        init(im2RGB);
 
-    try
+    else
     {
-        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-        cv::imshow("left_rectified_image", cv_ptr->image);
-        cv::waitKey(30);
+        double disp_Var = getVariance(disparity2);
+        if(disp_Var > 5)
+        {
+            cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
+            est_pose = pose_ekf2; //just use Odom
+            return;
+        }
+        else
+        {
+            cout << "Disparity Variance = " << disp_Var << " < 5.\tAccepted" << endl;
+        }
+        //pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_MAVLink = generateTmat(pose_ekf2);
+        //publish estimated pose
+        est_pose = pose_ekf2;
+        pose_estimate.publish(est_pose);
     }
-    catch (cv_bridge::Exception& e)
-    {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-    }
-
-    //extract_features(cv_ptr->image, posee_ptr);
 }
 
-//void disparityImageCallback(const stereo_msgs::DisparityImage& msg)
-//{
-//    cv_bridge::CvImagePtr cv_ptr;
 
-//    try
-//    {
-//        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-//        cv::imshow("left_rectified_image", cv_ptr->image);
-//        cv::waitKey(30);
-//    }
-//    catch (cv_bridge::Exception& e)
-//    {
-//        ROS_ERROR("cv_bridge exception: %s", e.what());
-//    }
-//}
+void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageConstPtr& disp_msg, const nav_msgs::Odometry::ConstPtr& odom_msg, pose_estimator &posee_ptr)
+{
+  cv_bridge::CvImagePtr rectIm_ptr;
+  cv_bridge::CvImagePtr dispIm_ptr;
+
+  try
+  {
+      posee_ptr.pose_ekf2 = odom_msg->pose.pose;
+      rectIm_ptr = cv_bridge::toCvCopy(rect_msg, image_encodings::BGR8);
+      posee_ptr.im2RGB = rectIm_ptr->image;
+
+      //Convert 32F disparity to 8U Grayscale
+      const Image& dimage = disp_msg->image;
+      const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
+      double min, max;
+      cv::minMaxLoc(dmat, &min, &max);
+
+      if (min!=max) //dont divide by zero
+          dmat.convertTo(posee_ptr.disparity2,CV_8U,255.0/max-min);
+
+      posee_ptr.estimatePose();
+
+//      //Display images for debug purposes
+//      cv::imshow("left_rectified_image", rectIm_ptr->image);
+//      cv::waitKey(30);
+
+//      cv::imshow("Disparity Img", posee_ptr.disparity2);
+//      cv::waitKey(30);
+
+  }
+  catch (cv_bridge::Exception& e)
+  {
+      ROS_ERROR("cv_bridge exception: %s", e.what());
+  }
+}
+
+
 
 int main(int argc, char **argv){
     // required to access ros. If this gives an error, make sure you are running
@@ -269,25 +381,28 @@ int main(int argc, char **argv){
 
     pose_estimator posee(&nh);
 
-    cv::namedWindow("left_rectified_image");
-    cv::startWindowThread();
     ROS_INFO("Initializing Subscribers");
-    image_transport::ImageTransport it(nh);
-    image_transport::Subscriber leftRect_image= it.subscribe("/left_right/left_rect/image_raw", 1, boost::bind(imageCallback, _1, posee));
+    message_filters::Subscriber<Image> left_rect_sub(nh, "/left_right/left_rect/image_raw", 1);
+    message_filters::Subscriber<stereo_msgs::DisparityImage> disparity_sub(nh, "/left_right/left_rect/disparity", 1);
+    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "pinocchio/mavros/local_position/odom", 1);
 
-//    ros::Subscriber sub = nh.subscribe("/left_right/left_rect/disparity", 1, disparityImageCallback);
+    typedef sync_policies::ApproximateTime<Image, stereo_msgs::DisparityImage, nav_msgs::Odometry> SyncPolicy;
+    Synchronizer<SyncPolicy> sync(SyncPolicy(10), left_rect_sub, disparity_sub, odom_sub);
+    sync.registerCallback(boost::bind(&callback, _1, _2, _3, posee));
 
-    ros::Publisher pose_estimate;
-    ROS_INFO("Initializing Publishers");
-    pose_estimate = nh.advertise<geometry_msgs::Pose>("estimated_pose",1);
 
+//    cv::namedWindow("left_rectified_image");
+//    cv::namedWindow("Disparity Img");
+//    cv::startWindowThread();
 
     ROS_INFO("Running");
+
 
 
     ros::spin();
 
 
-    cv::destroyWindow("left_rectified_image");
+//    cv::destroyWindow("left_rectified_image");
+//    cv::destroyWindow("Disparity Img");
     return 0;
 }

@@ -199,6 +199,8 @@ message(STATUS ${PCL_INCLUDE_DIRS})
 # )
 
 link_directories(${PCL_LIBRARY_DIRS})
+link_directories(/usr/local/include/opencv2)
+
 add_executable(pose_estimator src/pose_estimator.cpp)
 target_link_libraries(pose_estimator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${Boost_LIBRARIES})
 add_dependencies(pose_estimator pose_estimator_generate_messages_cpp)
