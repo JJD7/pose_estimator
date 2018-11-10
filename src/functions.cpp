@@ -1,37 +1,52 @@
 pcl::PointXYZRGB pose_estimator::generateUAVpos()
 {
         pcl::PointXYZRGB position;
-        position.x = tx;
-        position.y = ty;
-        position.z = tz;
+        position.x = pose_ekf2.position.x;
+        position.y = pose_ekf2.position.y;
+        position.z = pose_ekf2.position.z;
         uint32_t rgb = (uint32_t)255 << 16;	//red
         position.rgb = *reinterpret_cast<float*>(&rgb);
 
         return position;
 }
 
-pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 pose_estimator::generate_tf_of_Matched_Keypoints
-(bool &acceptDecision)
+void pose_estimator::generatePose()
+{
+
+}
+
+pcl::PointXYZRGB pose_estimator::transformPoint(pcl::PointXYZRGB hexPosMAVLink, pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 T_SVD_matched_pts)
+{
+        pcl::PointXYZRGB hexPosFM;// = pcl::transformPoint(hexPosMAVLink, T_SVD_matched_pts);
+        hexPosFM.x = static_cast<float> (T_SVD_matched_pts (0, 0) * hexPosMAVLink.x + T_SVD_matched_pts (0, 1) * hexPosMAVLink.y + T_SVD_matched_pts (0, 2) * hexPosMAVLink.z + T_SVD_matched_pts (0, 3));
+        hexPosFM.y = static_cast<float> (T_SVD_matched_pts (1, 0) * hexPosMAVLink.x + T_SVD_matched_pts (1, 1) * hexPosMAVLink.y + T_SVD_matched_pts (1, 2) * hexPosMAVLink.z + T_SVD_matched_pts (1, 3));
+        hexPosFM.z = static_cast<float> (T_SVD_matched_pts (2, 0) * hexPosMAVLink.x + T_SVD_matched_pts (2, 1) * hexPosMAVLink.y + T_SVD_matched_pts (2, 2) * hexPosMAVLink.z + T_SVD_matched_pts (2, 3));
+        uint32_t rgbFM = (uint32_t)255 << 8;	//green
+        hexPosFM.rgb = *reinterpret_cast<float*>(&rgbFM);
+
+        return hexPosFM;
+}
+
+void pose_estimator::generate_tf_of_Matched_Keypoints(bool &acceptDecision)
 {
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr current_img_matched_keypoints (new pcl::PointCloud<pcl::PointXYZRGB> ());
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr fitted_cloud_matched_keypoints (new pcl::PointCloud<pcl::PointXYZRGB> ());
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr prior_img_matched_keypoints (new pcl::PointCloud<pcl::PointXYZRGB> ());
         current_img_matched_keypoints->is_dense = true;
-        fitted_cloud_matched_keypoints->is_dense = true;
+        prior_img_matched_keypoints->is_dense = true;
 
         //find matches and create matched point clouds
-        int good_matches_count = generate_Matched_Keypoints_Point_Cloud(current_img_matched_keypoints, fitted_cloud_matched_keypoints);
+        int good_matches_count = generate_Matched_Keypoints_Point_Cloud(current_img_matched_keypoints, prior_img_matched_keypoints);
 
         if (good_matches_count < featureMatchingThreshold)
         {
                 acceptDecision = false;
         }
 
-        pcl::registration::TransformationEstimationSVD<pcl::PointXYZRGB, pcl::PointXYZRGB> te2;
-        pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 T_SVD_matched_pts;
+        //cout << "Compute Rigid Transform" << endl;
+        //pcl::registration::TransformationEstimationSVD<pcl::PointXYZRGB, pcl::PointXYZRGB> te2;
+        //te2.estimateRigidTransformation(*current_img_matched_keypoints, *prior_img_matched_keypoints, T_SVD_matched_pts);
 
-        te2.estimateRigidTransformation(*current_img_matched_keypoints, *fitted_cloud_matched_keypoints, T_SVD_matched_pts);
-
-        return T_SVD_matched_pts;
+        //cout << "T_SVD_Matched_Points " << endl << T_SVD_matched_pts << endl;
 }
 
 
@@ -169,9 +184,6 @@ pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>:
 			r_wh(i,j) = rot.at<double>(i,j);
 	r_wh(3,0) = r_wh(3,1) = r_wh(3,2) = r_wh(0,3) = r_wh(1,3) = r_wh(2,3) = 0.0;
 	r_wh(3,3) = 1.0;
-	//t_wh(0,3) = tx - tx * t_wh(0,0) - ty * t_wh(0,1) - tz * t_wh(0,2);
-	//t_wh(1,3) = ty - tx * t_wh(1,0) - ty * t_wh(1,1) - tz * t_wh(1,2);
-	//t_wh(2,3) = tz - tx * t_wh(2,0) - ty * t_wh(2,1) - tz * t_wh(2,2);
 	
 	//translation to translate hexacopter coordinates to world coordinates
 	pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_wh;
@@ -185,9 +197,9 @@ pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>:
 	t_wh(3,3) = 1.0;
 	
 	//translate hexacopter take off position to base station antenna location origin : Translation: [1.946, 6.634, -1.006]
-	const double antenna_takeoff_offset_x = 1.946;
-	const double antenna_takeoff_offset_y = 6.634;
-	const double antenna_takeoff_offset_z = -1.006;
+        const double antenna_takeoff_offset_x = 0;
+        const double antenna_takeoff_offset_y = 0;
+        const double antenna_takeoff_offset_z = 0;
 	pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_ow;
 	for (int i = 0; i < 4; i++)
 		for (int j = 0; j < 4; j++)

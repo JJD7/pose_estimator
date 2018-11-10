@@ -45,28 +45,16 @@
 #include <cv_bridge/cv_bridge.h>
 
 //PCL Includes
-#include <pcl/io/ply_io.h>
 #include <pcl/point_cloud.h>
-#include <pcl/console/parse.h>
 #include <pcl/common/transforms.h>
-#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
+#include <pcl/registration/icp.h>
 #include <pcl/registration/transformation_estimation.h>
 #include <pcl/registration/transformation_estimation_svd.h>
 #include <pcl/registration/transformation_estimation_svd_scale.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/registration/icp.h>
-#include <pcl/surface/mls.h>
-#include <pcl/kdtree/kdtree_flann.h>
-#include <pcl/surface/gp3.h>
-#include <pcl/sample_consensus/method_types.h>
-#include <pcl/sample_consensus/model_types.h>
-#include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/ModelCoefficients.h>
-#include <pcl/filters/project_inliers.h>
-#include <pcl/surface/concave_hull.h>
+
 
 using namespace std;
 using namespace cv;
@@ -80,10 +68,7 @@ class pose_estimator
     public:
     pose_estimator(ros::NodeHandle* nodehandle);
     ros::Publisher pose_estimate;
-    bool visualize = false;
-    bool align_point_cloud = false;
-    string read_PLY_filename0 = "";
-    string read_PLY_filename1 = "";
+
     double focallength = 16.0 / 1000 / 3.75 * 1000000;
     double baseline = 600.0 / 1000;
     double minDisparity = 64;
@@ -97,13 +82,13 @@ class pose_estimator
     Mat Q;
     const int featureMatchingThreshold = 100;
 
-    double tx;
-    double ty;
-    double tz;
-    double qx;
-    double qy;
-    double qz;
-    double qw;
+    //double tx;
+    //double ty;
+    //double tz;
+    //double qx;
+    //double qy;
+    //double qz;
+    //double qw;
 
     //translation and rotation between image and head of hexacopter
     const double trans_x_hi = -0.300;
@@ -115,6 +100,7 @@ class pose_estimator
 
     // Variables to store keypoints and descriptors
     Ptr<FeaturesFinder> finder;
+    pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     //Ptr<cv::DescriptorMatcher> matcher = cv::BFMatcher(cv::NORM_HAMMING);
     //Ptr<cuda::DescriptorMatcher> matcher = cv::cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
     ImageFeatures features1, features2;	//has features.keypoints and features.descriptors
@@ -128,12 +114,14 @@ class pose_estimator
     Mat disparity1, disparity2;
     Mat orb_img1, orb_img2;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D1, keypoints3D2;
+    pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 T_SVD_matched_pts;
     vector<bool> keypoints3D_ROI_Points1, keypoints3D_ROI_Points2; 
-    int generate_Matched_Keypoints_Point_Cloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &current_img_matched_keypoints, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &fitted_cloud_matched_keypoints);
+    int generate_Matched_Keypoints_Point_Cloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &current_img_matched_keypoints, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints);
 
     //Function Declarations
     void createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb);
-    void extract_features(Mat &im);
+    void generate_tf_of_Matched_Keypoints(bool &acceptDecision);
+    void extract_features();
     void init(Mat &im);
     void estimatePose();
     double getMean(Mat disp_img);
@@ -144,8 +132,8 @@ class pose_estimator
     void transformPtCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb, pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloudrgb, pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 transform);
     pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 generateTmat(geometry_msgs::Pose& pose);
     pcl::PointXYZRGB generateUAVpos();
-    pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 generate_tf_of_Matched_Keypoints(bool &acceptDecision);
     pcl::PointXYZRGB transformPoint(pcl::PointXYZRGB hexPosMAVLink, pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 T_SVD_matched_pts);
+
 
     private:
     ros::NodeHandle nh_;

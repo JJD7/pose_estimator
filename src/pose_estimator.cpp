@@ -4,6 +4,9 @@
 const int MAX_FEATURES = 1000;
 const float GOOD_MATCH_PERCENT = 0.15f;
 bool initializing = true;
+double accepted_im_count =0;
+float a = 0.5;
+float b = 1-a;
 
 pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
 { // constructor
@@ -119,12 +122,11 @@ void pose_estimator::createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>
     }
 }
 
-void pose_estimator::extract_features(Mat &im)
+void pose_estimator::extract_features()
 {
 
     // Convert images to grayscale
-    im2RGB = im;
-    cvtColor(im, im2Gray, CV_BGR2GRAY);
+    cvtColor(im2RGB, im2Gray, CV_BGR2GRAY);
 
     finder = makePtr<OrbFeaturesFinder>();
     (*finder)(im2RGB, features2);
@@ -133,18 +135,17 @@ void pose_estimator::extract_features(Mat &im)
     //gpu_descriptors2 = descriptor;
 
     vector<KeyPoint> keypoints = features2.keypoints;
-
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3dptcloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
     keypoints3dptcloud->is_dense = true;
-    keypoints3D2 = keypoints3dptcloud;
+
     vector<bool> pointsInROIVec;
 
     int good = 0, bad = 0;
     for (int i = 0; i < keypoints.size(); i++)
     {
             double disp_value;
-            disp_value = disparity2.at<char>(keypoints[i].pt.y, keypoints[i].pt.x);
-
+            disp_value = (double)disparity2.at<char>(keypoints[i].pt.y, keypoints[i].pt.x);
+            //cout << "disparity val = " << disp_value << endl;
             cv::Mat_<double> vec_src(4, 1);
 
             double xs = keypoints[i].pt.x;
@@ -173,28 +174,20 @@ void pose_estimator::extract_features(Mat &im)
                     pointsInROIVec.push_back(false);
             }
     }
-    //cout << " g" << good << "/b" << bad << flush;
-    cout << " g" << good << "/b" << bad << flush <<endl;
+
+    //cout << " g" << good << "/b" << bad << flush <<endl;
+    keypoints3D2 = keypoints3dptcloud;
     keypoints3D_ROI_Points2 = pointsInROIVec;
 }
 
 int pose_estimator::generate_Matched_Keypoints_Point_Cloud
 (pcl::PointCloud<pcl::PointXYZRGB>::Ptr &current_img_matched_keypoints,
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr &fitted_cloud_matched_keypoints)
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints)
 {
-    cout << " matched with_imgs/matches";
-
-    int good_matched_imgs_this_src = 0;
     int good_matches_count = 0;
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_src = keypoints3D2;
     vector<bool> pointsInROIVec_src = keypoints3D_ROI_Points2;
-
-
-    //reference https://stackoverflow.com/questions/44988087/opencv-feature-matching-match-descriptors-to-knn-filtered-keypoints
-    //reference https://github.com/opencv/opencv/issues/6130
-    //reference http://study.marearts.com/2014/07/opencv-study-orb-gpu-feature-extraction.html
-    //reference https://docs.opencv.org/3.1.0/d6/d1d/group__cudafeatures2d.html
 
     BFMatcher matcher(NORM_HAMMING);
     vector<vector<DMatch> > matches;
@@ -210,12 +203,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr &fitted_cloud_matched_keypoints)
         }
     }
 
-    if(good_matches.size() < featureMatchingThreshold/2)	//less number of matches.. don't bother working on this one. good matches are around 200-500
-        cout << "Insufficient number of feature matches for estimateing Feature Matched Pose" << endl;
-        // TO DO: Reject pose_estimate. Need to just use mavlink pose in this case
-
-    good_matched_imgs_this_src++;
-    good_matches_count += good_matches.size();
+    good_matches_count = good_matches.size();
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_dst = keypoints3D1;
 
@@ -245,30 +233,42 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr &fitted_cloud_matched_keypoints)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_prior_t_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
 
     //pcl::transformPointCloud(*cloud_current_temp, *cloud_current_t_temp, t_mat_MAVLink2);
+    //pcl::transformPointCloud(*cloud_prior_temp, *cloud_prior_t_temp, t_mat_MAVLink1);
 
-    pcl::transformPointCloud(*cloud_prior_temp, *cloud_prior_t_temp, t_mat_FeatureMatched1);
+    //current_img_matched_keypoints->insert(current_img_matched_keypoints->end(),cloud_current_t_temp->begin(),cloud_current_t_temp->end());
+    //prior_img_matched_keypoints->insert(prior_img_matched_keypoints->end(),cloud_prior_t_temp->begin(),cloud_prior_t_temp->end());
 
-    current_img_matched_keypoints->insert(current_img_matched_keypoints->end(),cloud_current_t_temp->begin(),cloud_current_t_temp->end());
-    fitted_cloud_matched_keypoints->insert(fitted_cloud_matched_keypoints->end(),cloud_prior_t_temp->begin(),cloud_prior_t_temp->end());
+
+
+    icp.setInputSource(cloud_prior_temp);
+    icp.setInputTarget(cloud_current_temp);
+    pcl::PointCloud<pcl::PointXYZRGB> Final;
+    icp.align(Final);
+    std::cout << "has converged:" << icp.hasConverged() << " score: " <<
+    icp.getFitnessScore() << std::endl;
+    std::cout << icp.getFinalTransformation() << std::endl;
+
 
     return good_matches_count;
 }
 
 void pose_estimator::init(Mat &im)
 {
+
     ROS_INFO("initalizing tracker");
     rows = im.rows;
     cols = im.cols;
     cols_start_aft_cutout = (int)(cols/cutout_ratio);
 
-    features1 = features2;
-    im1Gray = im2Gray;
-    im1RGB = im2RGB;
-    //orb_img1 = orb_img2;
-    initializing = false;
-    //gpu_descriptors1 = gpu_descriptors2;
-    pose_ekf1 = pose_ekf2;
 
+//    features1 = features2;
+//    im1Gray = im2Gray;
+//    im1RGB = im2RGB;
+//    //orb_img1 = orb_img2;
+
+//    //gpu_descriptors1 = gpu_descriptors2;
+//    pose_ekf1 = pose_ekf2;
+    initializing = false;
 }
 
 double pose_estimator::getMean(Mat disp_img)
@@ -279,7 +279,7 @@ double pose_estimator::getMean(Mat disp_img)
                 for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
                 {
                     double disp_val = 0;
-                    disp_val = (double)disp_img.at<uchar>(y,x);
+                    disp_val = (double)disp_img.at<char>(y,x);
 
                     if (disp_val > minDisparity)
                             sum += disp_val;
@@ -298,7 +298,7 @@ double pose_estimator::getVariance(Mat disp_img)
                 for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
                 {
                     double disp_val = 0;
-                    disp_val = (double)disp_img.at<uchar>(y,x);
+                    disp_val = (double)disp_img.at<char>(y,x);
 
                     if (disp_val > minDisparity)
                         temp += (disp_val-mean)*(disp_val-mean);
@@ -310,26 +310,71 @@ double pose_estimator::getVariance(Mat disp_img)
 
 void pose_estimator::estimatePose()
 {
+    extract_features();
+
+    t_mat_MAVLink2 = generateTmat(pose_ekf2);
+    //cout << "t_mat_Mavlink2 " << endl << t_mat_MAVLink2 << endl;
+    pcl::PointXYZRGB hexPosMAVLink = generateUAVpos();
+
     if(initializing)
         init(im2RGB);
 
     else
     {
         double disp_Var = getVariance(disparity2);
-        if(disp_Var > 5)
+        if(disp_Var > 50)
         {
             cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
             est_pose = pose_ekf2; //just use Odom
-            return;
+            accepted_im_count = 0; //reset so there is always two sequenctial images
+        }
+        else if(accepted_im_count>1) //need two consecutive good images
+        {
+            cout << "Disparity Variance = " << disp_Var << " < 5.\tAccepted" << endl;
+
+
+            //Feature Matching Alignment
+            //generate point clouds of matched keypoints and estimate rigid body transform between them
+            bool acceptDecision = true;
+            generate_tf_of_Matched_Keypoints(acceptDecision);
+
+            if (!acceptDecision)
+            {//rejected point -> no matches found
+                    cout << "\tLow Feature Matches.\tRejected!" << endl;
+            }
+
+            t_mat_FeatureMatched2 = T_SVD_matched_pts * t_mat_MAVLink2;
+            //cout << "T_mat_FM2: " << endl << t_mat_FeatureMatched2 << endl;
+
+            pcl::PointXYZRGB pose_FM2 = transformPoint(hexPosMAVLink, icp.getFinalTransformation());
+
+            //pcl::PointXYZRGB hexPosFM = t_mat_FeatureMatched1
+            //cout << "Hex Pose FM: " << endl << hexPosFM << endl;
+
+            //est_pose = pose_ekf1+a*(pose_ekf2-pose_ekf1);//+b*(pose_FM2-pose_FM1);
+            //cout << "janky pose estimate: " << endl << est_pose << endl;
+
+            est_pose = pose_ekf2;
         }
         else
         {
-            cout << "Disparity Variance = " << disp_Var << " < 5.\tAccepted" << endl;
+            accepted_im_count += 1;
+
         }
-        //pcl::registration::TransformationEstimation<pcl::PointXYZRGB, pcl::PointXYZRGB>::Matrix4 t_mat_MAVLink = generateTmat(pose_ekf2);
         //publish estimated pose
-        est_pose = pose_ekf2;
+
         pose_estimate.publish(est_pose);
+
+        features1 = features2;
+        im1Gray = im2Gray;
+        disparity1 = disparity2;
+        im1RGB = im2RGB;
+        pose_ekf1 = pose_ekf2;
+        keypoints3D_ROI_Points1 = keypoints3D_ROI_Points2;
+        keypoints3D1 = keypoints3D2;
+        t_mat_FeatureMatched1 = t_mat_FeatureMatched2;
+        t_mat_MAVLink1 = t_mat_MAVLink2;
+        keypoints3D1 = keypoints3D2;
     }
 }
 
@@ -346,22 +391,17 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
       posee_ptr.im2RGB = rectIm_ptr->image;
 
       //Convert 32F disparity to 8U Grayscale
-      const Image& dimage = disp_msg->image;
-      const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
-      double min, max;
-      cv::minMaxLoc(dmat, &min, &max);
-
-      if (min!=max) //dont divide by zero
-          dmat.convertTo(posee_ptr.disparity2,CV_8U,255.0/max-min);
-
+      const cv::Mat_<float> dmat(disp_msg->image.height, disp_msg->image.width, (float*)&disp_msg->image.data[0], disp_msg->image.step);
+      //cout << dmat << endl;
+      dmat.convertTo(posee_ptr.disparity2,CV_8U);
       posee_ptr.estimatePose();
 
 //      //Display images for debug purposes
 //      cv::imshow("left_rectified_image", rectIm_ptr->image);
 //      cv::waitKey(30);
 
-//      cv::imshow("Disparity Img", posee_ptr.disparity2);
-//      cv::waitKey(30);
+      cv::imshow("Disparity Img", posee_ptr.disparity2);
+      cv::waitKey(30);
 
   }
   catch (cv_bridge::Exception& e)
@@ -384,7 +424,7 @@ int main(int argc, char **argv){
     ROS_INFO("Initializing Subscribers");
     message_filters::Subscriber<Image> left_rect_sub(nh, "/left_right/left_rect/image_raw", 1);
     message_filters::Subscriber<stereo_msgs::DisparityImage> disparity_sub(nh, "/left_right/left_rect/disparity", 1);
-    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "pinocchio/mavros/local_position/odom", 1);
+    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "/mavros/local_position/odom", 1);
 
     typedef sync_policies::ApproximateTime<Image, stereo_msgs::DisparityImage, nav_msgs::Odometry> SyncPolicy;
     Synchronizer<SyncPolicy> sync(SyncPolicy(10), left_rect_sub, disparity_sub, odom_sub);
@@ -392,8 +432,8 @@ int main(int argc, char **argv){
 
 
 //    cv::namedWindow("left_rectified_image");
-//    cv::namedWindow("Disparity Img");
-//    cv::startWindowThread();
+    cv::namedWindow("Disparity Img");
+    cv::startWindowThread();
 
     ROS_INFO("Running");
 
@@ -403,6 +443,6 @@ int main(int argc, char **argv){
 
 
 //    cv::destroyWindow("left_rectified_image");
-//    cv::destroyWindow("Disparity Img");
+    cv::destroyWindow("Disparity Img");
     return 0;
 }
