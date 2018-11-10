@@ -1,5 +1,4 @@
 #include "pose_estimator.h"
-#include "functions.cpp"
 
 const int MAX_FEATURES = 1000;
 const float GOOD_MATCH_PERCENT = 0.15f;
@@ -7,6 +6,7 @@ bool initializing = true;
 double accepted_im_count =0;
 float a = 0.5;
 float b = 1-a;
+bool acceptDecision = true;
 
 pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
 { // constructor
@@ -29,102 +29,8 @@ void pose_estimator::readCalibFile()
         std::cout << Q << endl;
 }
 
-
-void pose_estimator::createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb)
-{
-
-    //cout << " Pt Cloud #" << accepted_img_index << flush;
-    cloudrgb->is_dense = true;
-
-    Mat dispImg;
-    dispImg = disparity2;
-
-    if(blur_kernel > 1)
-    {
-        //blur the disparity image to remove noise
-        Mat disp_img_blurred;
-        bilateralFilter ( dispImg, disp_img_blurred, blur_kernel, blur_kernel*2, blur_kernel/2 );
-        //medianBlur ( disp_img, disp_img_blurred, blur_kernel );
-        dispImg = disp_img_blurred;
-    }
-
-    vector<KeyPoint> keypoints = features2.keypoints;
-    Mat rgb_image = im2RGB;
-
-    cv::Mat_<double> vec_tmp(4,1);
-
-    //when jump_pixels == 1, all keypoints will be already included later as we will take in all points
-    //with jump_pixels == 0, we only want to take in keypoints
-    if (jump_pixels != 1)
-    {
-        for (int i = 0; i < keypoints.size(); i++)
-        {
-            int x = keypoints[i].pt.x, y = keypoints[i].pt.y;
-            if (x >= cols_start_aft_cutout && x < cols - boundingBox && y >= boundingBox && y < rows - boundingBox)
-            {
-                double disp_val = 0;
-                disp_val = (double)dispImg.at<uchar>(y,x);
-
-                if (disp_val > minDisparity)
-                {
-                    //reference: https://stackoverflow.com/questions/22418846/reprojectimageto3d-in-opencv
-                    vec_tmp(0)=x; vec_tmp(1)=y; vec_tmp(2)=disp_val; vec_tmp(3)=1;
-                    vec_tmp = Q*vec_tmp;
-                    vec_tmp /= vec_tmp(3);
-
-                    pcl::PointXYZRGB pt_3drgb;
-                    pt_3drgb.x = (float)vec_tmp(0);
-                    pt_3drgb.y = (float)vec_tmp(1);
-                    pt_3drgb.z = (float)vec_tmp(2);
-                    Vec3b color = rgb_image.at<Vec3b>(Point(x, y));
-
-                    uint32_t rgb = ((uint32_t)color[2] << 16 | (uint32_t)color[1] << 8 | (uint32_t)color[0]);
-                    pt_3drgb.rgb = *reinterpret_cast<float*>(&rgb);
-
-                    cloudrgb->points.push_back(pt_3drgb);
-                    //cout << pt_3d << endl;
-                }
-            }
-        }
-    }
-    if (jump_pixels > 0)
-    {
-        for (int y = boundingBox; y < rows - boundingBox;)
-        {
-            for (int x = cols_start_aft_cutout; x < cols - boundingBox;)
-            {
-                double disp_val = 0;
-                disp_val = (double)dispImg.at<uchar>(y,x);
-
-                if (disp_val > minDisparity)
-                {
-                    //reference: https://stackoverflow.com/questions/22418846/reprojectimageto3d-in-opencv
-                    vec_tmp(0)=x; vec_tmp(1)=y; vec_tmp(2)=disp_val; vec_tmp(3)=1;
-                    vec_tmp = Q*vec_tmp;
-                    vec_tmp /= vec_tmp(3);
-
-                    pcl::PointXYZRGB pt_3drgb;
-                    pt_3drgb.x = (float)vec_tmp(0);
-                    pt_3drgb.y = (float)vec_tmp(1);
-                    pt_3drgb.z = (float)vec_tmp(2);
-                    Vec3b color = rgb_image.at<Vec3b>(Point(x, y));
-
-                    uint32_t rgb = ((uint32_t)color[2] << 16 | (uint32_t)color[1] << 8 | (uint32_t)color[0]);
-                    pt_3drgb.rgb = *reinterpret_cast<float*>(&rgb);
-
-                    cloudrgb->points.push_back(pt_3drgb);
-                    //cout << pt_3d << endl;
-                }
-                x += jump_pixels;
-            }
-            y += jump_pixels;
-        }
-    }
-}
-
 void pose_estimator::extract_features()
 {
-
     // Convert images to grayscale
     cvtColor(im2RGB, im2Gray, CV_BGR2GRAY);
 
@@ -180,12 +86,8 @@ void pose_estimator::extract_features()
     keypoints3D_ROI_Points2 = pointsInROIVec;
 }
 
-int pose_estimator::generate_Matched_Keypoints_Point_Cloud
-(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &current_img_matched_keypoints,
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints)
+void pose_estimator::generate_FM_Transform()
 {
-    int good_matches_count = 0;
-
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_src = keypoints3D2;
     vector<bool> pointsInROIVec_src = keypoints3D_ROI_Points2;
 
@@ -202,8 +104,6 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints)
             good_matches.push_back(matches[k][0]);
         }
     }
-
-    good_matches_count = good_matches.size();
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_dst = keypoints3D1;
 
@@ -229,91 +129,85 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints)
         }
     }
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_current_t_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_prior_t_temp (new pcl::PointCloud<pcl::PointXYZRGB> ());
-
-    //pcl::transformPointCloud(*cloud_current_temp, *cloud_current_t_temp, t_mat_MAVLink2);
-    //pcl::transformPointCloud(*cloud_prior_temp, *cloud_prior_t_temp, t_mat_MAVLink1);
-
-    //current_img_matched_keypoints->insert(current_img_matched_keypoints->end(),cloud_current_t_temp->begin(),cloud_current_t_temp->end());
-    //prior_img_matched_keypoints->insert(prior_img_matched_keypoints->end(),cloud_prior_t_temp->begin(),cloud_prior_t_temp->end());
-
-
     icp.setInputSource(cloud_prior_temp);
     icp.setInputTarget(cloud_current_temp);
     pcl::PointCloud<pcl::PointXYZRGB> Final;
     icp.align(Final);
     std::cout << "has converged:" << icp.hasConverged() << " score: " <<
     icp.getFitnessScore() << std::endl;
-    std::cout << icp.getFinalTransformation() << std::endl;
+    //std::cout << icp.getFinalTransformation() << std::endl;
 
+    if (good_matches.size() < featureMatchingThreshold)
+    {
+            acceptDecision = false;
+    }
 
-    return good_matches_count;
 }
 
 void pose_estimator::init(Mat &im)
 {
-
     ROS_INFO("initalizing tracker");
     rows = im.rows;
     cols = im.cols;
     cols_start_aft_cutout = (int)(cols/cutout_ratio);
-
-
-//    features1 = features2;
-//    im1Gray = im2Gray;
-//    im1RGB = im2RGB;
-//    //orb_img1 = orb_img2;
-
-//    //gpu_descriptors1 = gpu_descriptors2;
-//    pose_ekf1 = pose_ekf2;
     initializing = false;
 }
 
 double pose_estimator::getMean(Mat disp_img)
 {
-        double sum = 0.0;
-        for (int y = boundingBox; y < rows - boundingBox; ++y)
+    double sum = 0.0;
+    for (int y = boundingBox; y < rows - boundingBox; ++y)
+    {
+        for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
         {
-                for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
-                {
-                    double disp_val = 0;
-                    disp_val = (double)disp_img.at<char>(y,x);
+            double disp_val = 0;
+            disp_val = (double)disp_img.at<char>(y,x);
 
-                    if (disp_val > minDisparity)
-                            sum += disp_val;
-                }
+            if (disp_val > minDisparity)
+                sum += disp_val;
         }
-        return sum/((rows - 2 * boundingBox )*(cols - boundingBox - cols_start_aft_cutout));
+    }
+    return sum/((rows - 2 * boundingBox )*(cols - boundingBox - cols_start_aft_cutout));
 }
 
 double pose_estimator::getVariance(Mat disp_img)
 {
-        double mean = getMean(disp_img);
-        double temp = 0;
+    double mean = getMean(disp_img);
+    double temp = 0;
 
-        for (int y = boundingBox; y < rows - boundingBox; ++y)
+    for (int y = boundingBox; y < rows - boundingBox; ++y)
+    {
+        for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
         {
-                for (int x = cols_start_aft_cutout; x < cols - boundingBox; ++x)
-                {
-                    double disp_val = 0;
-                    disp_val = (double)disp_img.at<char>(y,x);
+            double disp_val = 0;
+            disp_val = (double)disp_img.at<char>(y,x);
 
-                    if (disp_val > minDisparity)
-                        temp += (disp_val-mean)*(disp_val-mean);
-                }
+            if (disp_val > minDisparity)
+                temp += (disp_val-mean)*(disp_val-mean);
         }
-        double var = temp/((rows - 2 * boundingBox )*(cols - boundingBox - cols_start_aft_cutout) - 1);
-        return var;
+    }
+    double var = temp/((rows - 2 * boundingBox )*(cols - boundingBox - cols_start_aft_cutout) - 1);
+    return var;
+}
+
+void pose_estimator::generatePose()
+{
+    tf::Pose Pose1;
+    tf::Pose Pose2;
+    tf::poseMsgToTF(pose_ekf1,Pose1);
+    tf::poseMsgToTF(pose_ekf2,Pose2);
+    tf::Pose diff_FCU = Pose1.inverseTimes(Pose2);// Pose1.inverse() * Pose2;
+    tf::Pose Pose_Estimate = Pose1*diff_FCU;
+
+    tf::poseTFToMsg(Pose_Estimate,est_pose);
+    cout << "estimated pose: " << endl << est_pose;
+    //cout << "difference in pose " << endl << diff_FCU << endl;
+    //pose = pose_ekf2.pose;
 }
 
 void pose_estimator::estimatePose()
 {
     extract_features();
-
-    t_mat_MAVLink2 = generateTmat(pose_ekf2);
-    //cout << "t_mat_Mavlink2 " << endl << t_mat_MAVLink2 << endl;
-    pcl::PointXYZRGB hexPosMAVLink = generateUAVpos();
 
     if(initializing)
         init(im2RGB);
@@ -323,36 +217,25 @@ void pose_estimator::estimatePose()
         double disp_Var = getVariance(disparity2);
         if(disp_Var > 50)
         {
-            cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
+            //cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
             est_pose = pose_ekf2; //just use Odom
             accepted_im_count = 0; //reset so there is always two sequenctial images
         }
         else if(accepted_im_count>1) //need two consecutive good images
         {
-            cout << "Disparity Variance = " << disp_Var << " < 5.\tAccepted" << endl;
-
+            //cout << "Disparity Variance = " << disp_Var << " < 5.\tAccepted" << endl;
 
             //Feature Matching Alignment
             //generate point clouds of matched keypoints and estimate rigid body transform between them
-            bool acceptDecision = true;
-            generate_tf_of_Matched_Keypoints(acceptDecision);
+            acceptDecision = true;
+            generate_FM_Transform();
 
             if (!acceptDecision)
             {//rejected point -> no matches found
                     cout << "\tLow Feature Matches.\tRejected!" << endl;
             }
 
-            t_mat_FeatureMatched2 = T_SVD_matched_pts * t_mat_MAVLink2;
-            //cout << "T_mat_FM2: " << endl << t_mat_FeatureMatched2 << endl;
-
-            pcl::PointXYZRGB pose_FM2 = transformPoint(hexPosMAVLink, icp.getFinalTransformation());
-
-            //pcl::PointXYZRGB hexPosFM = t_mat_FeatureMatched1
-            //cout << "Hex Pose FM: " << endl << hexPosFM << endl;
-
-            //est_pose = pose_ekf1+a*(pose_ekf2-pose_ekf1);//+b*(pose_FM2-pose_FM1);
-            //cout << "janky pose estimate: " << endl << est_pose << endl;
-
+            generatePose();
             est_pose = pose_ekf2;
         }
         else
@@ -371,9 +254,7 @@ void pose_estimator::estimatePose()
         pose_ekf1 = pose_ekf2;
         keypoints3D_ROI_Points1 = keypoints3D_ROI_Points2;
         keypoints3D1 = keypoints3D2;
-        t_mat_FeatureMatched1 = t_mat_FeatureMatched2;
-        t_mat_MAVLink1 = t_mat_MAVLink2;
-        keypoints3D1 = keypoints3D2;
+
     }
 }
 
