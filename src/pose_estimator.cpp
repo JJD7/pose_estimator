@@ -239,7 +239,6 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr &prior_img_matched_keypoints)
     //prior_img_matched_keypoints->insert(prior_img_matched_keypoints->end(),cloud_prior_t_temp->begin(),cloud_prior_t_temp->end());
 
 
-
     icp.setInputSource(cloud_prior_temp);
     icp.setInputTarget(cloud_current_temp);
     pcl::PointCloud<pcl::PointXYZRGB> Final;
