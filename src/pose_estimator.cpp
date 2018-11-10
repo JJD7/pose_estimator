@@ -196,13 +196,11 @@ void pose_estimator::generatePose()
     tf::Pose Pose2;
     tf::poseMsgToTF(pose_ekf1,Pose1);
     tf::poseMsgToTF(pose_ekf2,Pose2);
-    tf::Pose diff_FCU = Pose1.inverseTimes(Pose2);// Pose1.inverse() * Pose2;
+    tf::Pose diff_FCU = Pose1.inverseTimes(Pose2);
     tf::Pose Pose_Estimate = Pose1*diff_FCU;
 
     tf::poseTFToMsg(Pose_Estimate,est_pose);
     cout << "estimated pose: " << endl << est_pose;
-    //cout << "difference in pose " << endl << diff_FCU << endl;
-    //pose = pose_ekf2.pose;
 }
 
 void pose_estimator::estimatePose()
