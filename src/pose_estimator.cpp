@@ -135,7 +135,12 @@ void pose_estimator::generate_FM_Transform()
     icp.align(Final);
     std::cout << "has converged:" << icp.hasConverged() << " score: " <<
     icp.getFitnessScore() << std::endl;
-    //std::cout << icp.getFinalTransformation() << std::endl;
+
+    Eigen::Matrix4f trafo = icp.getFinalTransformation();
+    Eigen::Transform<float, 3, Eigen::Affine> tROTA(trafo);
+
+    pcl::getTranslationAndEulerAngles(tROTA, dx_FM, dy_FM, dz_FM, droll_FM, dpitch_FM, dyaw_FM);
+
 
     if (good_matches.size() < featureMatchingThreshold)
     {
@@ -192,15 +197,85 @@ double pose_estimator::getVariance(Mat disp_img)
 
 void pose_estimator::generatePose()
 {
-    tf::Pose Pose1;
-    tf::Pose Pose2;
-    tf::poseMsgToTF(pose_ekf1,Pose1);
-    tf::poseMsgToTF(pose_ekf2,Pose2);
-    tf::Pose diff_FCU = Pose1.inverseTimes(Pose2);
-    tf::Pose Pose_Estimate = Pose1*diff_FCU;
+    tf::Point P1_ekf(
+                pose_ekf1.position.x,
+                pose_ekf1.position.y,
+                pose_ekf1.position.z);
 
-    tf::poseTFToMsg(Pose_Estimate,est_pose);
-    cout << "estimated pose: " << endl << est_pose;
+    tf::Quaternion q1_ekf(
+                pose_ekf1.orientation.x,
+                pose_ekf1.orientation.y,
+                pose_ekf1.orientation.z,
+                pose_ekf1.orientation.w);
+    tf::Matrix3x3 m1_ekf(q1_ekf);
+    double roll1_ekf, pitch1_ekf, yaw1_ekf;
+    m1_ekf.getRPY(roll1_ekf, pitch1_ekf, yaw1_ekf);
+
+
+    tf::Point P2_ekf(
+                pose_ekf2.position.x,
+                pose_ekf2.position.y,
+                pose_ekf2.position.z);
+    tf::Quaternion q2_ekf(
+                pose_ekf2.orientation.x,
+                pose_ekf2.orientation.y,
+                pose_ekf2.orientation.z,
+                pose_ekf2.orientation.w);
+    tf::Matrix3x3 m2_ekf(q2_ekf);
+    double roll2_ekf, pitch2_ekf, yaw2_ekf;
+    m2_ekf.getRPY(roll2_ekf, pitch2_ekf, yaw2_ekf);
+
+    tf::Point pDiff_FM(
+                dx_FM,
+                dy_FM,
+                dz_FM);
+
+    tf::Quaternion qDiff_FM;
+
+    tf::Point pDiff_ekf;
+    tf::Quaternion qDiff_ekf;
+    double droll_ekf, dpitch_ekf, dyaw_ekf;
+
+
+    droll_ekf = (roll2_ekf-roll1_ekf);
+    dpitch_ekf = (pitch2_ekf-pitch1_ekf);
+    dyaw_ekf = (yaw2_ekf-yaw1_ekf);
+
+
+    pDiff_ekf = P2_ekf-P1_ekf;
+    qDiff_ekf = tf::createQuaternionFromRPY(droll_ekf,dpitch_ekf,dyaw_ekf);
+    qDiff_FM = tf::createQuaternionFromRPY((double)droll_FM,(double)dpitch_FM,(double)dyaw_FM);
+
+    tf::Point p_estimate;
+    tf::Quaternion q_estimate;
+
+    p_estimate[0] = P1_ekf[0]+a*pDiff_ekf[0]+b*pDiff_FM[0];
+    p_estimate[2] = P1_ekf[1]+a*pDiff_ekf[1]+b*pDiff_FM[1];
+    p_estimate[2] = P1_ekf[2]+a*pDiff_ekf[2]+b*pDiff_FM[2];
+
+    q_estimate[0] = q1_ekf[0]+a*qDiff_ekf[0]+b*qDiff_FM[0];
+    q_estimate[1] = q1_ekf[1]+a*qDiff_ekf[1]+b*qDiff_FM[1];
+    q_estimate[2] = q1_ekf[2]+a*qDiff_ekf[2]+b*qDiff_FM[2];
+    q_estimate[3] = q1_ekf[3]+a*qDiff_ekf[3]+b*qDiff_FM[3];
+    //q_estimate.normalize();
+//    est_pose.position.x = p_estimate[0];
+//    est_pose.position.y = p_estimate[1];
+//    est_pose.position.z = p_estimate[2];
+//    est_pose.orientation.x = q_estimate[0];
+//    est_pose.orientation.y = q_estimate[1];
+//    est_pose.orientation.z = q_estimate[2];
+//    est_pose.orientation.w = q_estimate[3];
+
+    est_pose.position.x = P1_ekf[0]+a*pDiff_ekf[0]+b*pDiff_FM[0];
+    est_pose.position.y = P1_ekf[1]+a*pDiff_ekf[1]+b*pDiff_FM[1];
+    est_pose.position.z = P1_ekf[2]+a*pDiff_ekf[2]+b*pDiff_FM[2];
+    est_pose.orientation.x = q_estimate[0];
+    est_pose.orientation.y = q_estimate[1];
+    est_pose.orientation.z = q_estimate[2];
+    est_pose.orientation.w = q_estimate[3];
+
+    cout << "estimated pose: " << endl << est_pose << endl;
+
 }
 
 void pose_estimator::estimatePose()

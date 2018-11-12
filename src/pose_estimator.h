@@ -7,6 +7,7 @@
 #include <string>
 #include <math.h>
 #include <stdio.h>
+#include <Eigen/Geometry>
 
 //Ros includes
 #include <ros/ros.h>
@@ -81,6 +82,7 @@ class pose_estimator
     string calib_file_Dir = "/home/jd/catkin_ws/src/ros_multi_baseline_stereo/ros_sgm/config/";
     Mat Q;
     const int featureMatchingThreshold = 100;
+    float dx_FM, dy_FM, dz_FM, droll_FM, dpitch_FM, dyaw_FM;
 
     ////translation and rotation between image and head of hexacopter
     //const double trans_x_hi = -0.300;
