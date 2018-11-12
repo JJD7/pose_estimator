@@ -129,23 +129,24 @@ void pose_estimator::generate_FM_Transform()
         }
     }
 
-    icp.setInputSource(cloud_prior_temp);
-    icp.setInputTarget(cloud_current_temp);
-    pcl::PointCloud<pcl::PointXYZRGB> Final;
-    icp.align(Final);
-    std::cout << "has converged:" << icp.hasConverged() << " score: " <<
-    icp.getFitnessScore() << std::endl;
-
-    // source: https://stackoverflow.com/questions/18956151/icp-transformation-matrix-interpretation
-    Eigen::Matrix4f trafo = icp.getFinalTransformation();
-    Eigen::Transform<float, 3, Eigen::Affine> tROTA(trafo);
-
-    pcl::getTranslationAndEulerAngles(tROTA, dx_FM, dy_FM, dz_FM, droll_FM, dpitch_FM, dyaw_FM);
-
-
-    if (good_matches.size() < featureMatchingThreshold)
+    if (good_matches.size() < featureMatchingThreshold) //dont estimate transform from this set
     {
-            acceptDecision = false;
+        acceptDecision = false;
+    }
+    else //good enough to estimate transorm
+    {
+        icp.setInputSource(cloud_prior_temp);
+        icp.setInputTarget(cloud_current_temp);
+        pcl::PointCloud<pcl::PointXYZRGB> Final;
+        icp.align(Final);
+        std::cout << "has converged:" << icp.hasConverged() << " score: " <<
+        icp.getFitnessScore() << std::endl;
+
+        // source: https://stackoverflow.com/questions/18956151/icp-transformation-matrix-interpretation
+        Eigen::Matrix4f trafo = icp.getFinalTransformation();
+        Eigen::Transform<float, 3, Eigen::Affine> tROTA(trafo);
+
+        pcl::getTranslationAndEulerAngles(tROTA, dx_FM, dy_FM, dz_FM, droll_FM, dpitch_FM, dyaw_FM);
     }
 
 }
@@ -262,7 +263,7 @@ void pose_estimator::estimatePose()
         double disp_Var = getVariance(disparity2);
         if(disp_Var > 50)
         {
-            //cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
+            cout << " Disparity Variance = " << disp_Var << " > 50.\tRejected!" << endl;
             est_pose.pose = pose_ekf2; //just use Odom
             accepted_im_count = 0; //reset so there is always two sequenctial images
         }
@@ -276,22 +277,29 @@ void pose_estimator::estimatePose()
             generate_FM_Transform();
 
             if (!acceptDecision)
-            {//rejected point -> no matches found
+            {//insufficient matches to make good transform estimte
                     cout << "\tLow Feature Matches.\tRejected!" << endl;
+                    est_pose.pose = pose_ekf2; //just use original odom pose
             }
 
-            generatePose();
-            est_pose.pose = pose_ekf2;
+            else
+            {
+                generatePose(); //estimate the pose using both Feature match transform and odom msgs
+            }
+
+
         }
         else
         {
             accepted_im_count += 1;
+            est_pose.pose = pose_ekf2; //just use original odom pose until 2 consecutive good images are available
 
         }
         //publish estimated pose
 
         pose_estimate.publish(est_pose);
 
+        //update "previous" variables
         features1 = features2;
         im1Gray = im2Gray;
         disparity1 = disparity2;
