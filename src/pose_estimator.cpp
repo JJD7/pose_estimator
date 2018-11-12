@@ -14,7 +14,7 @@ pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
     readCalibFile();
 
     ROS_INFO("Initializing Publishers");
-    pose_estimate = nh_.advertise<geometry_msgs::Pose>("estimated_pose",1);
+    pose_estimate = nh_.advertise<geometry_msgs::PoseStamped>("estimated_pose",1);
 }
 
 void pose_estimator::readCalibFile()
@@ -235,14 +235,14 @@ void pose_estimator::generatePose()
     tf::Quaternion q_estimate;
     q_estimate = tf::createQuaternionFromRPY(droll,dpitch,dyaw);
 
-    est_pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
-    est_pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
-    est_pose.position.z = pose_ekf1.position.z + a*(pose_ekf2.position.z - pose_ekf1.position.z)+b*dz_FM;
+    est_pose.pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
+    est_pose.pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
+    est_pose.pose.position.z = pose_ekf1.position.z + a*(pose_ekf2.position.z - pose_ekf1.position.z)+b*dz_FM;
 
-    est_pose.orientation.x = q_estimate[0];
-    est_pose.orientation.y = q_estimate[1];
-    est_pose.orientation.z = q_estimate[2];
-    est_pose.orientation.w = q_estimate[3];
+    est_pose.pose.orientation.x = q_estimate[0];
+    est_pose.pose.orientation.y = q_estimate[1];
+    est_pose.pose.orientation.z = q_estimate[2];
+    est_pose.pose.orientation.w = q_estimate[3];
 
     cout << "estimated pose: " << endl << est_pose << endl;
 
@@ -261,7 +261,7 @@ void pose_estimator::estimatePose()
         if(disp_Var > 50)
         {
             //cout << " Disparity Variance = " << disp_Var << " > 5.\tRejected!" << endl;
-            est_pose = pose_ekf2; //just use Odom
+            est_pose.pose = pose_ekf2; //just use Odom
             accepted_im_count = 0; //reset so there is always two sequenctial images
         }
         else if(accepted_im_count>1) //need two consecutive good images
@@ -279,7 +279,7 @@ void pose_estimator::estimatePose()
             }
 
             generatePose();
-            est_pose = pose_ekf2;
+            est_pose.pose = pose_ekf2;
         }
         else
         {
@@ -309,6 +309,7 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
 
   try
   {
+      posee_ptr.est_pose.header = odom_msg->header;
       posee_ptr.pose_ekf2 = odom_msg->pose.pose;
       rectIm_ptr = cv_bridge::toCvCopy(rect_msg, image_encodings::BGR8);
       posee_ptr.im2RGB = rectIm_ptr->image;

@@ -96,7 +96,8 @@ class pose_estimator
     Ptr<FeaturesFinder> finder;
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     ImageFeatures features1, features2;	//has features.keypoints and features.descriptors
-    geometry_msgs::Pose est_pose, pose_ekf1, pose_ekf2;
+    geometry_msgs::Pose pose_ekf1, pose_ekf2;
+    geometry_msgs::PoseStamped est_pose;
     std::vector<DMatch> matches;
     std::vector<Point2f> points1, points2;
     Mat im1Gray, im2Gray, im1RGB, im2RGB;
