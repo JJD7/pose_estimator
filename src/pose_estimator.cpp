@@ -225,21 +225,15 @@ void pose_estimator::generatePose()
     double roll2_ekf, pitch2_ekf, yaw2_ekf;
     m2_ekf.getRPY(roll2_ekf, pitch2_ekf, yaw2_ekf);
 
-    tf::Point pDiff_FM(
-                dx_FM,
-                dy_FM,
-                dz_FM);
-
     double droll, dpitch, dyaw;
 
 
-    droll = a*(roll2_ekf-roll1_ekf)+b*droll_FM;
-    dpitch = a*(pitch2_ekf-pitch1_ekf)+b*dpitch_FM;
-    dyaw = a*(yaw2_ekf-yaw1_ekf)+b*dyaw_FM;
+    droll = roll1_ekf + a*(roll2_ekf-roll1_ekf)+b*droll_FM;
+    dpitch = pitch1_ekf + a*(pitch2_ekf-pitch1_ekf)+b*dpitch_FM;
+    dyaw = yaw1_ekf + a*(yaw2_ekf-yaw1_ekf)+b*dyaw_FM;
 
-    tf::Point p_estimate;
     tf::Quaternion q_estimate;
-    q_estimate = tf::createQuaternionFromRPY((double)droll_FM,(double)dpitch_FM,(double)dyaw_FM);
+    q_estimate = tf::createQuaternionFromRPY(droll,dpitch,dyaw);
 
     est_pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
     est_pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
