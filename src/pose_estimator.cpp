@@ -230,45 +230,21 @@ void pose_estimator::generatePose()
                 dy_FM,
                 dz_FM);
 
-    tf::Quaternion qDiff_FM;
-
-    tf::Point pDiff_ekf;
-    tf::Quaternion qDiff_ekf;
-    double droll_ekf, dpitch_ekf, dyaw_ekf;
+    double droll, dpitch, dyaw;
 
 
-    droll_ekf = (roll2_ekf-roll1_ekf);
-    dpitch_ekf = (pitch2_ekf-pitch1_ekf);
-    dyaw_ekf = (yaw2_ekf-yaw1_ekf);
-
-
-    pDiff_ekf = P2_ekf-P1_ekf;
-    qDiff_ekf = tf::createQuaternionFromRPY(droll_ekf,dpitch_ekf,dyaw_ekf);
-    qDiff_FM = tf::createQuaternionFromRPY((double)droll_FM,(double)dpitch_FM,(double)dyaw_FM);
+    droll = a*(roll2_ekf-roll1_ekf)+b*droll_FM;
+    dpitch = a*(pitch2_ekf-pitch1_ekf)+b*dpitch_FM;
+    dyaw = a*(yaw2_ekf-yaw1_ekf)+b*dyaw_FM;
 
     tf::Point p_estimate;
     tf::Quaternion q_estimate;
+    q_estimate = tf::createQuaternionFromRPY((double)droll_FM,(double)dpitch_FM,(double)dyaw_FM);
 
-    p_estimate[0] = P1_ekf[0]+a*pDiff_ekf[0]+b*pDiff_FM[0];
-    p_estimate[2] = P1_ekf[1]+a*pDiff_ekf[1]+b*pDiff_FM[1];
-    p_estimate[2] = P1_ekf[2]+a*pDiff_ekf[2]+b*pDiff_FM[2];
+    est_pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
+    est_pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
+    est_pose.position.z = pose_ekf1.position.z + a*(pose_ekf2.position.z - pose_ekf1.position.z)+b*dz_FM;
 
-    q_estimate[0] = q1_ekf[0]+a*qDiff_ekf[0]+b*qDiff_FM[0];
-    q_estimate[1] = q1_ekf[1]+a*qDiff_ekf[1]+b*qDiff_FM[1];
-    q_estimate[2] = q1_ekf[2]+a*qDiff_ekf[2]+b*qDiff_FM[2];
-    q_estimate[3] = q1_ekf[3]+a*qDiff_ekf[3]+b*qDiff_FM[3];
-    //q_estimate.normalize();
-//    est_pose.position.x = p_estimate[0];
-//    est_pose.position.y = p_estimate[1];
-//    est_pose.position.z = p_estimate[2];
-//    est_pose.orientation.x = q_estimate[0];
-//    est_pose.orientation.y = q_estimate[1];
-//    est_pose.orientation.z = q_estimate[2];
-//    est_pose.orientation.w = q_estimate[3];
-
-    est_pose.position.x = P1_ekf[0]+a*pDiff_ekf[0]+b*pDiff_FM[0];
-    est_pose.position.y = P1_ekf[1]+a*pDiff_ekf[1]+b*pDiff_FM[1];
-    est_pose.position.z = P1_ekf[2]+a*pDiff_ekf[2]+b*pDiff_FM[2];
     est_pose.orientation.x = q_estimate[0];
     est_pose.orientation.y = q_estimate[1];
     est_pose.orientation.z = q_estimate[2];
