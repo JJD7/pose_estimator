@@ -136,6 +136,7 @@ void pose_estimator::generate_FM_Transform()
     std::cout << "has converged:" << icp.hasConverged() << " score: " <<
     icp.getFitnessScore() << std::endl;
 
+    // source: https://stackoverflow.com/questions/18956151/icp-transformation-matrix-interpretation
     Eigen::Matrix4f trafo = icp.getFinalTransformation();
     Eigen::Transform<float, 3, Eigen::Affine> tROTA(trafo);
 
@@ -234,6 +235,7 @@ void pose_estimator::generatePose()
 
     tf::Quaternion q_estimate;
     q_estimate = tf::createQuaternionFromRPY(droll,dpitch,dyaw);
+    q_estimate = -q_estimate;
 
     est_pose.pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
     est_pose.pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
