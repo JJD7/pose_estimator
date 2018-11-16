@@ -4,22 +4,42 @@ const int MAX_FEATURES = 1000;
 const float GOOD_MATCH_PERCENT = 0.15f;
 bool initializing = true;
 double accepted_im_count =0;
-float a = 0.5;
-float b = 1-a;
 bool acceptDecision = true;
 
-pose_estimator::pose_estimator(ros::NodeHandle* nodehandle):nh_(*nodehandle)
-{ // constructor
-    ROS_INFO("in class constructor of pose_estimator");
+PoseEstimate::PoseEstimate(ros::NodeHandle* nodehandle):nh_(*nodehandle)
+{
+
+    calib_file = "cam13calib.yml";
+    calib_file_Dir = "/home/jd/catkin_ws/src/ros_multi_baseline_stereo/ros_sgm/config/";
+
+    ROS_INFO("in class constructor of PoseEstimate");
     readCalibFile();
+
+    focallength = 16.0 / 1000 / 3.75 * 1000000;
+    baseline = 600.0 / 1000;
+    minDisparity = 64;
+    rows = 0;
+    cols = 0;
+    cols_start_aft_cutout = 0;
+    blur_kernel = 1;
+    boundingBox = 20;
+    cutout_ratio = 8;
+    _estimator_weight = 0;
+    featureMatchingThreshold = 100;
+
 
     ROS_INFO("Initializing Publishers");
     pose_estimate = nh_.advertise<geometry_msgs::PoseStamped>("estimated_pose",1);
+
+    dynamic_reconfigure::Server<pose_estimator::EstimatorConfig>::CallbackType f;
+    f = boost::bind(&PoseEstimate::estimator_reconfig_cb, this, _1, _2);
+    _estimator_cfg_server.setCallback(f);
+
 }
 
-void pose_estimator::readCalibFile()
+void PoseEstimate::readCalibFile()
 {
-        ROS_INFO("Loading Calibration File");
+        ROS_INFO("Loading Calibrati on File");
         cv::FileStorage fs(calib_file_Dir + calib_file, cv::FileStorage::READ);
         fs["Q"] >> Q;
         if(Q.empty())
@@ -29,7 +49,7 @@ void pose_estimator::readCalibFile()
         std::cout << Q << endl;
 }
 
-void pose_estimator::extract_features()
+void PoseEstimate::extract_features()
 {
     // Convert images to grayscale
     cvtColor(im2RGB, im2Gray, CV_BGR2GRAY);
@@ -86,7 +106,7 @@ void pose_estimator::extract_features()
     keypoints3D_ROI_Points2 = pointsInROIVec;
 }
 
-void pose_estimator::generate_FM_Transform()
+void PoseEstimate::generate_FM_Transform()
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints3D_src = keypoints3D2;
     vector<bool> pointsInROIVec_src = keypoints3D_ROI_Points2;
@@ -151,7 +171,7 @@ void pose_estimator::generate_FM_Transform()
 
 }
 
-void pose_estimator::init(Mat &im)
+void PoseEstimate::init(Mat &im)
 {
     ROS_INFO("initalizing tracker");
     rows = im.rows;
@@ -160,7 +180,7 @@ void pose_estimator::init(Mat &im)
     initializing = false;
 }
 
-double pose_estimator::getMean(Mat disp_img)
+double PoseEstimate::getMean(Mat disp_img)
 {
     double sum = 0.0;
     for (int y = boundingBox; y < rows - boundingBox; ++y)
@@ -177,7 +197,7 @@ double pose_estimator::getMean(Mat disp_img)
     return sum/((rows - 2 * boundingBox )*(cols - boundingBox - cols_start_aft_cutout));
 }
 
-double pose_estimator::getVariance(Mat disp_img)
+double PoseEstimate::getVariance(Mat disp_img)
 {
     double mean = getMean(disp_img);
     double temp = 0;
@@ -197,7 +217,7 @@ double pose_estimator::getVariance(Mat disp_img)
     return var;
 }
 
-void pose_estimator::generatePose()
+void PoseEstimate::generatePose()
 {
     tf::Point P1_ekf(
                 pose_ekf1.position.x,
@@ -230,28 +250,32 @@ void pose_estimator::generatePose()
     double droll, dpitch, dyaw;
 
 
-    droll = roll1_ekf + a*(roll2_ekf-roll1_ekf)+b*droll_FM;
-    dpitch = pitch1_ekf + a*(pitch2_ekf-pitch1_ekf)+b*dpitch_FM;
-    dyaw = yaw1_ekf + a*(yaw2_ekf-yaw1_ekf)+b*dyaw_FM;
+    droll = roll1_ekf + (1-_estimator_weight)*(roll2_ekf-roll1_ekf)+_estimator_weight*droll_FM;
+    dpitch = pitch1_ekf + (1-_estimator_weight)*(pitch2_ekf-pitch1_ekf)+_estimator_weight*dpitch_FM;
+    dyaw = yaw1_ekf + (1-_estimator_weight)*(yaw2_ekf-yaw1_ekf)+_estimator_weight*dyaw_FM;
 
     tf::Quaternion q_estimate;
     q_estimate = tf::createQuaternionFromRPY(droll,dpitch,dyaw);
-    q_estimate = -q_estimate;
+    q_estimate[0] = -q_estimate[0];
+    q_estimate[1] = -q_estimate[1];
+    q_estimate[2] = -q_estimate[2];
+    q_estimate[3] = -q_estimate[3];
 
-    est_pose.pose.position.x = pose_ekf1.position.x + a*(pose_ekf2.position.x - pose_ekf1.position.x)+b*dx_FM;
-    est_pose.pose.position.y = pose_ekf1.position.y + a*(pose_ekf2.position.y - pose_ekf1.position.y)+b*dy_FM;
-    est_pose.pose.position.z = pose_ekf1.position.z + a*(pose_ekf2.position.z - pose_ekf1.position.z)+b*dz_FM;
+
+    est_pose.pose.position.x = pose_ekf1.position.x + (1-_estimator_weight)*(pose_ekf2.position.x - pose_ekf1.position.x)+_estimator_weight*dx_FM;
+    est_pose.pose.position.y = pose_ekf1.position.y + (1-_estimator_weight)*(pose_ekf2.position.y - pose_ekf1.position.y)+_estimator_weight*dy_FM;
+    est_pose.pose.position.z = pose_ekf1.position.z + (1-_estimator_weight)*(pose_ekf2.position.z - pose_ekf1.position.z)+_estimator_weight*dz_FM;
 
     est_pose.pose.orientation.x = q_estimate[0];
     est_pose.pose.orientation.y = q_estimate[1];
     est_pose.pose.orientation.z = q_estimate[2];
     est_pose.pose.orientation.w = q_estimate[3];
 
-    cout << "estimated pose: " << endl << est_pose << endl;
+    //cout << "estimated pose: " << endl << est_pose << endl;
 
 }
 
-void pose_estimator::estimatePose()
+void PoseEstimate::estimatePose()
 {
     extract_features();
 
@@ -311,8 +335,12 @@ void pose_estimator::estimatePose()
     }
 }
 
+void PoseEstimate::estimator_reconfig_cb(pose_estimator::EstimatorConfig& cfg, uint32_t level)
+{
+    _estimator_weight = cfg.estimator_weight;
+}
 
-void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageConstPtr& disp_msg, const nav_msgs::Odometry::ConstPtr& odom_msg, pose_estimator &posee_ptr)
+void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageConstPtr& disp_msg, const nav_msgs::Odometry::ConstPtr& odom_msg, PoseEstimate &posee_ptr)
 {
   cv_bridge::CvImagePtr rectIm_ptr;
   cv_bridge::CvImagePtr dispIm_ptr;
@@ -349,11 +377,11 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
 int main(int argc, char **argv){
     // required to access ros. If this gives an error, make sure you are running
     // roscore on your machine.
-    ros::init(argc,argv,"pose_estimator");
+    ros::init(argc,argv,"PoseEstimate");
     ros::NodeHandle nh;
     ros::Duration(.1).sleep();
 
-    pose_estimator posee(&nh);
+    PoseEstimate posee(&nh);
 
     ROS_INFO("Initializing Subscribers");
     message_filters::Subscriber<Image> left_rect_sub(nh, "/left_right/left_rect/image_raw", 1);
@@ -362,7 +390,7 @@ int main(int argc, char **argv){
 
     typedef sync_policies::ApproximateTime<Image, stereo_msgs::DisparityImage, nav_msgs::Odometry> SyncPolicy;
     Synchronizer<SyncPolicy> sync(SyncPolicy(10), left_rect_sub, disparity_sub, odom_sub);
-    sync.registerCallback(boost::bind(&callback, _1, _2, _3, posee));
+    sync.registerCallback(boost::bind(&callback, _1, _2, _3, boost::ref(posee)));
 
 
 //    cv::namedWindow("left_rectified_image");

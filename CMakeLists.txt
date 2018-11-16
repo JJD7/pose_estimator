@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   image_transport
   cv_bridge
+  dynamic_reconfigure
 )
 
 find_package( OpenCV REQUIRED )
@@ -106,6 +107,10 @@ find_package( CUDA REQUIRED )
 #   cfg/DynReconf1.cfg
 #   cfg/DynReconf2.cfg
 # )
+## Generate dynamic reconfigure parameters in the 'cfg' folder
+generate_dynamic_reconfigure_options(
+  cfg/Estimator.cfg
+)
 
 ###################################
 ## catkin specific configuration ##
@@ -203,7 +208,7 @@ link_directories(/usr/local/include/opencv2)
 
 add_executable(pose_estimator src/pose_estimator.cpp)
 target_link_libraries(pose_estimator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${Boost_LIBRARIES})
-add_dependencies(pose_estimator pose_estimator_generate_messages_cpp)
+add_dependencies(pose_estimator pose_estimator_generate_messages_cpp ${PROJECT_NAME}_gencfg)
 add_definitions(${PCL_DEFINITIONS})
 
 ## Mark cpp header files for installation
