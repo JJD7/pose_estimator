@@ -359,6 +359,7 @@ void PoseEstimate::getTransform()
     catch (tf::TransformException &ex) {
       ROS_ERROR("PoseEstimator: %s",ex.what());
       ros::Duration(1.0).sleep();
+      ros::shutdown(); //Don't have a passthrough coded currently so if the transform lookup fails we want to kill this node
     }
 }
 
