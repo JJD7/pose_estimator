@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   cv_bridge
   dynamic_reconfigure
+  tf
 )
 
 find_package( OpenCV REQUIRED )
@@ -124,7 +125,7 @@ generate_dynamic_reconfigure_options(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pose_estimator
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+  CATKIN_DEPENDS roscpp rospy std_msgs tf
 #  DEPENDS system_lib
 )
 

@@ -68,8 +68,10 @@ class PoseEstimate
 public:
     PoseEstimate(ros::NodeHandle* nodehandle);
 
-
+    std_msgs::Header imgHeader;
     ros::Publisher pose_estimate;
+    tf::TransformListener tf_listener;
+    tf::StampedTransform camera_link_tf;
 
     double focallength;
     double baseline;
@@ -97,7 +99,7 @@ public:
     Ptr<FeaturesFinder> finder;
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     ImageFeatures features1, features2;	//has features.keypoints and features.descriptors
-    geometry_msgs::Pose pose_ekf1, pose_ekf2;
+    geometry_msgs::Pose pose_ekf1, pose_ekf2;	
     geometry_msgs::PoseStamped est_pose;
     std::vector<DMatch> matches;
     std::vector<Point2f> points1, points2;
@@ -116,6 +118,7 @@ public:
     double getMean(Mat disp_img);
     double getVariance(Mat disp_img);
     void generatePose();
+    void getTransform();
     void estimator_reconfig_cb(pose_estimator::EstimatorConfig& cfg, uint32_t level);
 
 private:

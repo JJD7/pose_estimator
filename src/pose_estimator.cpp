@@ -15,6 +15,7 @@ PoseEstimate::PoseEstimate(ros::NodeHandle* nodehandle):nh_(*nodehandle)
     ROS_INFO("in class constructor of PoseEstimate");
     readCalibFile();
 
+
     focallength = 16.0 / 1000 / 3.75 * 1000000;
     baseline = 600.0 / 1000;
     minDisparity = 64;
@@ -177,6 +178,8 @@ void PoseEstimate::init(Mat &im)
     rows = im.rows;
     cols = im.cols;
     cols_start_aft_cutout = (int)(cols/cutout_ratio);
+
+    getTransform();
     initializing = false;
 }
 
@@ -271,6 +274,18 @@ void PoseEstimate::generatePose()
     est_pose.pose.orientation.z = q_estimate[2];
     est_pose.pose.orientation.w = q_estimate[3];
 
+
+    tf::Stamped<tf::Pose> poseEst;
+
+    tf::poseStampedMsgToTF(est_pose, poseEst);
+
+    tf::Pose poseHolder;
+    poseHolder = camera_link_tf*poseEst;
+
+    tf::Stamped<tf::Pose> stampedPoseHolder(poseHolder, poseEst.stamp_, poseEst.frame_id_);
+
+    tf::poseStampedTFToMsg(stampedPoseHolder, est_pose);
+
     //cout << "estimated pose: " << endl << est_pose << endl;
 
 }
@@ -298,7 +313,7 @@ void PoseEstimate::estimatePose()
             //Feature Matching Alignment
             //generate point clouds of matched keypoints and estimate rigid body transform between them
             acceptDecision = true;
-            generate_FM_Transform();
+            generate_FM_Transform(); //Will update acceptDecision here if good enough matches are not found
 
             if (!acceptDecision)
             {//insufficient matches to make good transform estimte
@@ -335,6 +350,18 @@ void PoseEstimate::estimatePose()
     }
 }
 
+void PoseEstimate::getTransform()
+{
+    try
+    {
+        tf_listener.lookupTransform(imgHeader.frame_id, est_pose.header.frame_id, ros::Time(0), camera_link_tf);
+    }
+    catch (tf::TransformException &ex) {
+      ROS_ERROR("PoseEstimator: %s",ex.what());
+      ros::Duration(1.0).sleep();
+    }
+}
+
 void PoseEstimate::estimator_reconfig_cb(pose_estimator::EstimatorConfig& cfg, uint32_t level)
 {
     _estimator_weight = cfg.estimator_weight;
@@ -347,6 +374,7 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
 
   try
   {
+      posee_ptr.imgHeader = rect_msg->header;
       posee_ptr.est_pose.header = odom_msg->header;
       posee_ptr.pose_ekf2 = odom_msg->pose.pose;
       rectIm_ptr = cv_bridge::toCvCopy(rect_msg, image_encodings::BGR8);
@@ -362,8 +390,8 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
 //      cv::imshow("left_rectified_image", rectIm_ptr->image);
 //      cv::waitKey(30);
 
-      cv::imshow("Disparity Img", posee_ptr.disparity2);
-      cv::waitKey(30);
+//      cv::imshow("Disparity Img", posee_ptr.disparity2);
+//      cv::waitKey(30);
 
   }
   catch (cv_bridge::Exception& e)
@@ -386,7 +414,7 @@ int main(int argc, char **argv){
     ROS_INFO("Initializing Subscribers");
     message_filters::Subscriber<Image> left_rect_sub(nh, "/left_right/left_rect/image_raw", 1);
     message_filters::Subscriber<stereo_msgs::DisparityImage> disparity_sub(nh, "/left_right/left_rect/disparity", 1);
-    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "/mavros/local_position/odom", 1);
+    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "/pinocchio/mavros/local_position/odom", 1);
 
     typedef sync_policies::ApproximateTime<Image, stereo_msgs::DisparityImage, nav_msgs::Odometry> SyncPolicy;
     Synchronizer<SyncPolicy> sync(SyncPolicy(10), left_rect_sub, disparity_sub, odom_sub);
@@ -394,8 +422,8 @@ int main(int argc, char **argv){
 
 
 //    cv::namedWindow("left_rectified_image");
-    cv::namedWindow("Disparity Img");
-    cv::startWindowThread();
+//    cv::namedWindow("Disparity Img");
+//    cv::startWindowThread();
 
     ROS_INFO("Running");
 
@@ -405,6 +433,6 @@ int main(int argc, char **argv){
 
 
 //    cv::destroyWindow("left_rectified_image");
-    cv::destroyWindow("Disparity Img");
+//    cv::destroyWindow("Disparity Img");
     return 0;
 }
