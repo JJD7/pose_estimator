@@ -73,15 +73,15 @@ public:
     tf::TransformListener tf_listener;
     tf::StampedTransform camera_link_tf;
 
-    double focallength;
-    double baseline;
+    // double focallength;
+    // double baseline;
     double minDisparity;
     int rows, cols, cols_start_aft_cutout;
     int blur_kernel;
     int boundingBox;
     int cutout_ratio; //ratio of masking to be done on left side of image as this area is not covered in stereo disparity images.
-    string calib_file;
-    string calib_file_Dir;
+    // string calib_file;
+    // string calib_file_Dir;
     Mat Q;
     int featureMatchingThreshold;
     float dx_FM, dy_FM, dz_FM, droll_FM, dpitch_FM, dyaw_FM;
@@ -123,7 +123,7 @@ public:
 
 private:
     ros::NodeHandle nh_;
-    void readCalibFile();
+    void readCalibFile(const std::string& calib_file_name);
     float _estimator_weight;
 };
 

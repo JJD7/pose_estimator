@@ -8,40 +8,44 @@ bool acceptDecision = true;
 
 PoseEstimate::PoseEstimate(ros::NodeHandle* nodehandle):nh_(*nodehandle)
 {
+    ros::NodeHandle pnh("~");
 
-    calib_file = "cam13calib.yml";
-    calib_file_Dir = "/home/jd/catkin_ws/src/ros_multi_baseline_stereo/ros_sgm/config/";
+    std::string calib_file_name;
+    if (pnh.getParam("stereo_calibration_file", calib_file_name))
+    {
+        ROS_INFO("in class constructor of PoseEstimate");
+        readCalibFile(calib_file_name);
 
-    ROS_INFO("in class constructor of PoseEstimate");
-    readCalibFile();
+        // focallength = 16.0 / 1000 / 3.75 * 1000000;
+        // baseline = 600.0 / 1000;
+        minDisparity = 64;
+        rows = 0;
+        cols = 0;
+        cols_start_aft_cutout = 0;
+        blur_kernel = 1;
+        boundingBox = 20;
+        cutout_ratio = 8;
+        _estimator_weight = 0;
+        featureMatchingThreshold = 100;
 
 
-    focallength = 16.0 / 1000 / 3.75 * 1000000;
-    baseline = 600.0 / 1000;
-    minDisparity = 64;
-    rows = 0;
-    cols = 0;
-    cols_start_aft_cutout = 0;
-    blur_kernel = 1;
-    boundingBox = 20;
-    cutout_ratio = 8;
-    _estimator_weight = 0;
-    featureMatchingThreshold = 100;
+        ROS_INFO("Initializing Publishers");
+        pose_estimate = nh_.advertise<geometry_msgs::PoseStamped>("estimated_pose",1);
 
-
-    ROS_INFO("Initializing Publishers");
-    pose_estimate = nh_.advertise<geometry_msgs::PoseStamped>("estimated_pose",1);
-
-    dynamic_reconfigure::Server<pose_estimator::EstimatorConfig>::CallbackType f;
-    f = boost::bind(&PoseEstimate::estimator_reconfig_cb, this, _1, _2);
-    _estimator_cfg_server.setCallback(f);
-
+        dynamic_reconfigure::Server<pose_estimator::EstimatorConfig>::CallbackType f;
+        f = boost::bind(&PoseEstimate::estimator_reconfig_cb, this, _1, _2);
+        _estimator_cfg_server.setCallback(f);
+    }
+    else
+    {
+        ROS_ERROR("Failed to read in stereo_calibration_file_name!");
+    }
 }
 
-void PoseEstimate::readCalibFile()
+void PoseEstimate::readCalibFile(const std::string& calib_file_name)
 {
         ROS_INFO("Loading Calibrati on File");
-        cv::FileStorage fs(calib_file_Dir + calib_file, cv::FileStorage::READ);
+        cv::FileStorage fs(calib_file_name, cv::FileStorage::READ);
         fs["Q"] >> Q;
         if(Q.empty())
                 throw "Exception: could not read Q matrix";
