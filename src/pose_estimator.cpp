@@ -288,7 +288,7 @@ void PoseEstimate::generatePose()
     tf::poseStampedMsgToTF(est_pose, poseEst);
 
     tf::Pose poseHolder;
-    poseHolder = camera_link_tf*poseEst;
+    poseHolder = poseEst*camera_link_tf;
     //float test = camera_link_tf.getOrigin().x();
     ROS_INFO("[%f, %f, %f], [%f, %f, %f, %f]",camera_link_tf.getOrigin().x(), camera_link_tf.getOrigin().y(), camera_link_tf.getOrigin().z(), camera_link_tf.getRotation().getX(), camera_link_tf.getRotation().getY(), camera_link_tf.getRotation().getZ(), camera_link_tf.getRotation().getW());
 
@@ -305,15 +305,20 @@ void PoseEstimate::estimatePose(const std::string& child_frame_id)
     extract_features();
 
     if(initializing)
+    {
         init(im2RGB, child_frame_id);
-
+    }
     else
     {
         double disp_Var = getVariance(disparity2);
         if(disp_Var > 50)
         {
             cout << " Disparity Variance = " << disp_Var << " > 50.\tRejected!" << endl;
-            est_pose.pose = pose_ekf2; //just use Odom
+            tf::Pose tf_orig_pose;
+    	    tf::poseMsgToTF(pose_ekf2, tf_orig_pose);
+
+            tf::Pose poseHolder = tf_orig_pose*camera_link_tf;
+            tf::poseTFToMsg(poseHolder, est_pose.pose);
             accepted_im_count = 0; //reset so there is always two sequenctial images
         }
         else if(accepted_im_count>1) //need two consecutive good images
@@ -333,7 +338,6 @@ void PoseEstimate::estimatePose(const std::string& child_frame_id)
 
                     tf::Pose poseHolder = tf_orig_pose*camera_link_tf;
                     tf::poseTFToMsg(poseHolder, est_pose.pose);
-                    est_pose.pose = pose_ekf2; //just use original odom pose
             }
 
             else
@@ -352,12 +356,10 @@ void PoseEstimate::estimatePose(const std::string& child_frame_id)
 
             tf::Pose poseHolder = tf_orig_pose*camera_link_tf;
             tf::poseTFToMsg(poseHolder, est_pose.pose);
-
-            pose_estimate.publish(est_pose);
-
         }
-        //publish estimated pose
 
+        //publish estimated pose
+	pose_estimate.publish(est_pose);
         
 
         //update "previous" variables
