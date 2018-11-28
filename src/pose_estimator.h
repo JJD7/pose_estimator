@@ -113,12 +113,12 @@ public:
     void createImgPtCloud(Mat &im, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudrgb);
     void generate_FM_Transform();
     void extract_features();
-    void init(Mat &im);
-    void estimatePose();
+    void init(Mat &im, const std::string& child_frame_id);
+    void estimatePose(const std::string& child_frame_id);
     double getMean(Mat disp_img);
     double getVariance(Mat disp_img);
     void generatePose();
-    void getTransform();
+    bool getTransform(const std::string& child_frame_id);
     void estimator_reconfig_cb(pose_estimator::EstimatorConfig& cfg, uint32_t level);
 
 private:

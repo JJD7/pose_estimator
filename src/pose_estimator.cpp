@@ -176,14 +176,18 @@ void PoseEstimate::generate_FM_Transform()
 
 }
 
-void PoseEstimate::init(Mat &im)
+void PoseEstimate::init(Mat &im, const std::string& child_frame_id)
 {
     ROS_INFO("initalizing tracker");
     rows = im.rows;
     cols = im.cols;
     cols_start_aft_cutout = (int)(cols/cutout_ratio);
 
-    getTransform();
+    while (!getTransform(child_frame_id))
+    {
+        ros::Duration(1.0).sleep();
+        ROS_WARN("PoseEstimator: waiting for transform to exist: %s -> %s", imgHeader.frame_id.c_str(), est_pose.header.frame_id.c_str());
+    }
     initializing = false;
 }
 
@@ -285,6 +289,8 @@ void PoseEstimate::generatePose()
 
     tf::Pose poseHolder;
     poseHolder = camera_link_tf*poseEst;
+    //float test = camera_link_tf.getOrigin().x();
+    ROS_INFO("[%f, %f, %f], [%f, %f, %f, %f]",camera_link_tf.getOrigin().x(), camera_link_tf.getOrigin().y(), camera_link_tf.getOrigin().z(), camera_link_tf.getRotation().getX(), camera_link_tf.getRotation().getY(), camera_link_tf.getRotation().getZ(), camera_link_tf.getRotation().getW());
 
     tf::Stamped<tf::Pose> stampedPoseHolder(poseHolder, poseEst.stamp_, poseEst.frame_id_);
 
@@ -294,12 +300,12 @@ void PoseEstimate::generatePose()
 
 }
 
-void PoseEstimate::estimatePose()
+void PoseEstimate::estimatePose(const std::string& child_frame_id)
 {
     extract_features();
 
     if(initializing)
-        init(im2RGB);
+        init(im2RGB, child_frame_id);
 
     else
     {
@@ -322,6 +328,11 @@ void PoseEstimate::estimatePose()
             if (!acceptDecision)
             {//insufficient matches to make good transform estimte
                     cout << "\tLow Feature Matches.\tRejected!" << endl;
+                    tf::Pose tf_orig_pose;
+    	    	    tf::poseMsgToTF(pose_ekf2, tf_orig_pose);
+
+                    tf::Pose poseHolder = tf_orig_pose*camera_link_tf;
+                    tf::poseTFToMsg(poseHolder, est_pose.pose);
                     est_pose.pose = pose_ekf2; //just use original odom pose
             }
 
@@ -335,12 +346,19 @@ void PoseEstimate::estimatePose()
         else
         {
             accepted_im_count += 1;
-            est_pose.pose = pose_ekf2; //just use original odom pose until 2 consecutive good images are available
+
+            tf::Pose tf_orig_pose;
+    	    tf::poseMsgToTF(pose_ekf2, tf_orig_pose);
+
+            tf::Pose poseHolder = tf_orig_pose*camera_link_tf;
+            tf::poseTFToMsg(poseHolder, est_pose.pose);
+
+            pose_estimate.publish(est_pose);
 
         }
         //publish estimated pose
 
-        pose_estimate.publish(est_pose);
+        
 
         //update "previous" variables
         features1 = features2;
@@ -354,17 +372,22 @@ void PoseEstimate::estimatePose()
     }
 }
 
-void PoseEstimate::getTransform()
+bool PoseEstimate::getTransform(const std::string& child_frame_id)
 {
     try
     {
-        tf_listener.lookupTransform(imgHeader.frame_id, est_pose.header.frame_id, ros::Time(0), camera_link_tf);
+        tf_listener.lookupTransform(imgHeader.frame_id, child_frame_id, ros::Time(0), camera_link_tf); 
+        ROS_INFO("Looked up transform from %s -> %s",imgHeader.frame_id.c_str(),child_frame_id.c_str());
+        ROS_INFO("[%f, %f, %f], [%f, %f, %f, %f]",camera_link_tf.getOrigin().x(), camera_link_tf.getOrigin().y(), camera_link_tf.getOrigin().z(), camera_link_tf.getRotation().getX(), camera_link_tf.getRotation().getY(), camera_link_tf.getRotation().getZ(), camera_link_tf.getRotation().getW());
     }
     catch (tf::TransformException &ex) {
       ROS_ERROR("PoseEstimator: %s",ex.what());
-      ros::Duration(1.0).sleep();
-      ros::shutdown(); //Don't have a passthrough coded currently so if the transform lookup fails we want to kill this node
+      return false;
+      //ros::Duration(1.0).sleep();
+      //ros::shutdown(); //Don't have a passthrough coded currently so if the transform lookup fails we want to kill this node
     }
+
+    return true;
 }
 
 void PoseEstimate::estimator_reconfig_cb(pose_estimator::EstimatorConfig& cfg, uint32_t level)
@@ -379,6 +402,8 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
 
   try
   {
+      ros::WallTime start_t = ros::WallTime::now();
+
       posee_ptr.imgHeader = rect_msg->header;
       posee_ptr.est_pose.header = odom_msg->header;
       posee_ptr.pose_ekf2 = odom_msg->pose.pose;
@@ -389,7 +414,10 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
       const cv::Mat_<float> dmat(disp_msg->image.height, disp_msg->image.width, (float*)&disp_msg->image.data[0], disp_msg->image.step);
       //cout << dmat << endl;
       dmat.convertTo(posee_ptr.disparity2,CV_8U);
-      posee_ptr.estimatePose();
+      posee_ptr.estimatePose(odom_msg->child_frame_id);
+
+      ros::WallTime end_t = ros::WallTime::now();
+      ROS_INFO_THROTTLE(5.0, "Pose Est Time = %f",(end_t - start_t).toSec());
 
 //      //Display images for debug purposes
 //      cv::imshow("left_rectified_image", rectIm_ptr->image);
@@ -412,14 +440,14 @@ int main(int argc, char **argv){
     // roscore on your machine.
     ros::init(argc,argv,"PoseEstimate");
     ros::NodeHandle nh;
-    ros::Duration(.1).sleep();
+    ros::Time::waitForValid();
 
     PoseEstimate posee(&nh);
 
     ROS_INFO("Initializing Subscribers");
-    message_filters::Subscriber<Image> left_rect_sub(nh, "/left_right/left_rect/image_raw", 1);
-    message_filters::Subscriber<stereo_msgs::DisparityImage> disparity_sub(nh, "/left_right/left_rect/disparity", 1);
-    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "/pinocchio/mavros/local_position/odom", 1);
+    message_filters::Subscriber<Image> left_rect_sub(nh, "left_rect/image_raw", 1);
+    message_filters::Subscriber<stereo_msgs::DisparityImage> disparity_sub(nh, "left_rect/disparity", 1);
+    message_filters::Subscriber<nav_msgs::Odometry> odom_sub(nh, "mavros/local_position/odom", 1);
 
     typedef sync_policies::ApproximateTime<Image, stereo_msgs::DisparityImage, nav_msgs::Odometry> SyncPolicy;
     Synchronizer<SyncPolicy> sync(SyncPolicy(10), left_rect_sub, disparity_sub, odom_sub);

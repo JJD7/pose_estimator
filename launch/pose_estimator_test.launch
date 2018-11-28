@@ -1,0 +1,60 @@
+<launch>
+
+  <arg name="vehicle_name" default="pinocchio"/>
+
+  <group ns="$(arg vehicle_name)">
+
+<!-- load Pinocchio Description -->
+    <param name="robot_description" command="$(find xacro)/xacro --inorder '$(find iucrc_final)/models/pinocchio/pinocchio.urdf.xacro' link_ns:='$(arg vehicle_name)' "/>
+
+    <!-- Joint State Publisher -->
+    <include file="$(find iucrc)/launch/gazebo_iris_joint_state_pub.launch"/>
+
+    <!-- Robot State Publisher -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>
+
+     <node name="debayer_nodelet_manager" pkg="nodelet" type="nodelet" args="manager"/>
+
+    <node name="left_debayer" pkg="nodelet" type="nodelet" args="load image_proc/debayer debayer_nodelet_manager">
+      <remap from="image_raw" to="left_camera/image_raw"/>
+      <remap from="image_color" to="left_camera_color/image_raw"/>
+      <remap from="image_mono" to="left_camera_mono/image_raw"/>
+    </node>
+
+<node name="right_debayer" pkg="nodelet" type="nodelet" args="load image_proc/debayer debayer_nodelet_manager">
+      <remap from="image_raw" to="right_camera/image_raw"/>
+      <remap from="image_color" to="right_camera_color/image_raw"/>
+      <remap from="image_mono" to="right_camera_mono/image_raw"/>
+    </node>
+
+<node name="left_info_color_relay" pkg="topic_tools" type="relay" args="left_camera/camera_info left_camera_color/camera_info">
+      <param name="lazy" value="true"/>
+    </node>
+
+<node name="right_info_color_relay" pkg="topic_tools" type="relay" args="right_camera/camera_info right_camera_color/camera_info">
+      <param name="lazy" value="true"/>
+    </node>
+
+<node name="left_right_stereo" pkg="ros_sgm" type="ros_sgm_node" output="screen">
+    <param name="stereo_calibration_file" value="$(find ros_sgm)/config/cam13calib.yml"/>
+    <param name="stereo_penalty_p1" value="7"/>
+    <param name="stereo_penalty_p2" value="200"/>
+    <remap from="left_img_in" to="left_camera_color/image_raw"/>
+    <remap from="left_info_in" to="left_camera_color/camera_info"/>
+    <remap from="right_img_in" to="right_camera_color/image_raw"/>
+    <remap from="right_info_in" to="right_camera_color/camera_info"/>
+    <remap from="left_rect_color/image_raw" to="left_right/left_rect/image_raw"/>
+    <remap from="left_rect_color/camera_info" to="left_right/left_rect/camera_info"/>
+    <remap from="right_rect_color/image_raw" to="left_right/right_rect/image_raw"/>
+    <remap from="right_rect_color/camera_info" to="left_right/right_rect/camera_info"/>
+    <remap from="left_disparity" to="left_right/left_rect/disparity"/>
+  </node>
+
+
+<node name="PoseEstimate" pkg="pose_estimator" type="pose_estimator" output="screen">
+		<param name="stereo_calibration_file" value="$(find ros_sgm)/config/cam13calib.yml"/>
+		<remap from="left_rect/image_raw" to="left_right/left_rect/image_raw"/>
+		<remap from="left_rect/disparity" to="left_right/left_rect/disparity"/>
+	</node>
+</group>
+</launch>
