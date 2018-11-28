@@ -289,8 +289,7 @@ void PoseEstimate::generatePose()
 
     tf::Pose poseHolder;
     poseHolder = poseEst*camera_link_tf;
-    //float test = camera_link_tf.getOrigin().x();
-    ROS_INFO("[%f, %f, %f], [%f, %f, %f, %f]",camera_link_tf.getOrigin().x(), camera_link_tf.getOrigin().y(), camera_link_tf.getOrigin().z(), camera_link_tf.getRotation().getX(), camera_link_tf.getRotation().getY(), camera_link_tf.getRotation().getZ(), camera_link_tf.getRotation().getW());
+    //ROS_INFO("[%f, %f, %f], [%f, %f, %f, %f]",camera_link_tf.getOrigin().x(), camera_link_tf.getOrigin().y(), camera_link_tf.getOrigin().z(), camera_link_tf.getRotation().getX(), camera_link_tf.getRotation().getY(), camera_link_tf.getRotation().getZ(), camera_link_tf.getRotation().getW());
 
     tf::Stamped<tf::Pose> stampedPoseHolder(poseHolder, poseEst.stamp_, poseEst.frame_id_);
 
@@ -343,9 +342,8 @@ void PoseEstimate::estimatePose(const std::string& child_frame_id)
             else
             {
                 generatePose(); //estimate the pose using both Feature match transform and odom msgs
+                ROS_INFO("Full pose calculation!");
             }
-
-
         }
         else
         {
@@ -419,7 +417,7 @@ void callback(const ImageConstPtr& rect_msg, const stereo_msgs::DisparityImageCo
       posee_ptr.estimatePose(odom_msg->child_frame_id);
 
       ros::WallTime end_t = ros::WallTime::now();
-      ROS_INFO_THROTTLE(5.0, "Pose Est Time = %f",(end_t - start_t).toSec());
+      ROS_INFO("Pose Est Time = %f",(end_t - start_t).toSec());
 
 //      //Display images for debug purposes
 //      cv::imshow("left_rectified_image", rectIm_ptr->image);
